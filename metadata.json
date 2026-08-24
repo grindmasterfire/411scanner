@@ -1,0 +1,6 @@
+{
+  "name": "411 Scanner",
+  "description": "Deterministic hybrid intelligence scanner and diagnostic evidence engine.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

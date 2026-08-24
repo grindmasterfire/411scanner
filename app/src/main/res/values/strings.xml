@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">411 Scanner</string>
+    <string name="default_web_client_id" translatable="false">184842490207-dev-web-client.apps.googleusercontent.com</string>
+</resources>
