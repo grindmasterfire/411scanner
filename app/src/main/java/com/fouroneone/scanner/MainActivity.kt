@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.google.firebase.FirebaseApp
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -30,9 +31,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        try { FirebaseApp.initializeApp(applicationContext) } catch (e: Exception) {}
         enableEdgeToEdge()
         incomingImageUriState = IntentHandler.extractImageUri(intent)
-        AuthManager.init()
+        AuthManager.init(applicationContext)
         AdManager.initialize(applicationContext)
         BillingManager.initialize(applicationContext)
 
@@ -73,6 +75,11 @@ fun ScannerMainScreen(incomingUri: Uri?, onClearUri: () -> Unit) {
     var isLoading by remember { mutableStateOf(false) }
     var scanResult by remember { mutableStateOf<String?>(null) }
     var scanError by remember { mutableStateOf<String?>(null) }
+    var recentScans by remember { mutableStateOf(ScanHistoryManager.getRecentScans(context)) }
+
+    fun refreshRecentScans() {
+        recentScans = ScanHistoryManager.getRecentScans(context)
+    }
 
     fun processImageUri(uri: Uri?) {
         selectedUri = uri
@@ -106,7 +113,13 @@ fun ScannerMainScreen(incomingUri: Uri?, onClearUri: () -> Unit) {
     }
 
     if (scanResult != null) {
-        ResultScreen(rawJson = scanResult!!, onDismiss = { scanResult = null })
+        ResultScreen(
+            rawJson = scanResult!!,
+            onDismiss = {
+                scanResult = null
+                refreshRecentScans()
+            }
+        )
         return
     }
 
@@ -116,7 +129,10 @@ fun ScannerMainScreen(incomingUri: Uri?, onClearUri: () -> Unit) {
         coroutineScope.launch {
             try {
                 QuotaManager.recordScan(context)
-                scanResult = ScanRepository.scan(b64)
+                val rawResponse = ScanRepository.scan(b64)
+                ScanHistoryManager.saveScan(context, rawResponse)
+                refreshRecentScans()
+                scanResult = rawResponse
             } catch (e: Exception) {
                 scanError = e.message ?: "Scan failed unexpectedly"
             } finally {
@@ -146,6 +162,11 @@ fun ScannerMainScreen(incomingUri: Uri?, onClearUri: () -> Unit) {
             Spacer(modifier = Modifier.height(16.dp))
             ImagePreviewFrame(bitmap = loadedBitmap, isConverting = isConverting)
             Spacer(modifier = Modifier.height(16.dp))
+
+            if (isLoading) {
+                CoinStarTicker(modifier = Modifier.fillMaxWidth())
+                Spacer(modifier = Modifier.height(16.dp))
+            }
 
             ScanControlsSection(
                 hasSelectedImage = selectedUri != null,
@@ -191,6 +212,15 @@ fun ScannerMainScreen(incomingUri: Uri?, onClearUri: () -> Unit) {
                     processImageUri(null)
                 }
             )
+
+            if (!isLoading && recentScans.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(24.dp))
+                RecentScansTray(
+                    recentScans = recentScans,
+                    onSelectScan = { cachedJson -> scanResult = cachedJson }
+                )
+            }
+
             Spacer(modifier = Modifier.height(24.dp))
         }
     }

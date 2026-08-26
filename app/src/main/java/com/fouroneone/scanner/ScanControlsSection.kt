@@ -40,6 +40,7 @@ fun ScanControlsSection(
     Column(modifier = modifier.fillMaxWidth()) {
         Button(
             onClick = onPickImage,
+            enabled = !isLoading,
             modifier = Modifier.fillMaxWidth().testTag("pick_image_button")
         ) {
             Icon(

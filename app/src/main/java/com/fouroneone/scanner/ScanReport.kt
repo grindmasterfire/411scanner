@@ -26,7 +26,7 @@ data class ConsumerCard(
     val developerOrEntity: String = "Not Identified",
     val metrics: Metrics = Metrics(),
     val metricAnnotations: MetricAnnotations = MetricAnnotations(),
-    val actionMeterScore: Int = 5,
+    val actionMeterScore: Double = 5.0,
     val actionVerdictBadge: String = "⚪ SOLID APP",
     val the411BottomLine: String = "",
     val deepDiveAnalysis: String? = null
@@ -84,7 +84,6 @@ data class ScanReport(
             return try {
                 val root = JSONObject(jsonString)
 
-                // The Cloud Function may wrap the report inside a "result" or "report" object
                 val reportObj = when {
                     root.has("report") -> root.getJSONObject("report")
                     root.has("result") && root.getJSONObject("result").has("report") ->
@@ -99,7 +98,7 @@ data class ScanReport(
                 val ccObj = reportObj.optJSONObject("consumer_card") ?: JSONObject()
                 val targetName = ccObj.optString("target_name", "Unknown Target")
                 val devOrEntity = ccObj.optString("developer_or_entity", "Not Identified")
-                val actionScore = ccObj.optInt("action_meter_score", 5)
+                val actionScore = ccObj.optDouble("action_meter_score", 5.0)
                 val actionBadge = ccObj.optString("action_verdict_badge", "⚪ SOLID APP")
                 val bottomLine = ccObj.optString("the411BottomLine", ccObj.optString("the_411_bottom_line", ""))
                 val deepDive = if (ccObj.has("deep_dive_analysis") && !ccObj.isNull("deep_dive_analysis")) {

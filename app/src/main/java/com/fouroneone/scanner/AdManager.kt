@@ -2,6 +2,7 @@ package com.fouroneone.scanner
 
 import android.app.Activity
 import android.content.Context
+import android.telephony.TelephonyManager
 import android.util.Log
 import com.google.android.gms.ads.AdError
 import com.google.android.gms.ads.AdRequest
@@ -10,10 +11,11 @@ import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.MobileAds
 import com.google.android.gms.ads.rewardedinterstitial.RewardedInterstitialAd
 import com.google.android.gms.ads.rewardedinterstitial.RewardedInterstitialAdLoadCallback
+import java.util.Locale
 
 /**
- * Manages Google Mobile Ads SDK initialization and Rewarded Interstitial ad gating.
- * Enforces strict gate-before-execute on diagnostic scan triggers.
+ * Manages Google Mobile Ads SDK initialization, geo-profitability filtering, and Rewarded Interstitial ad gating.
+ * Enforces strict gate-before-execute on diagnostic scan triggers and +1 scan ad rewards.
  */
 object AdManager {
 
@@ -22,9 +24,34 @@ object AdManager {
     // Google AdMob official sample Rewarded Interstitial test ad unit ID
     private const val SAMPLE_REWARDED_INTERSTITIAL_ID = "ca-app-pub-3940256099942544/5354046379"
 
+    private val TIER_1_MARKET_CODES = setOf(
+        "US", "CA", "GB", "AU", "NZ", "DE", "FR", "JP", "CH", "NL", "SE", "NO", "DK", "AT", "IE"
+    )
+
     private var rewardedInterstitialAd: RewardedInterstitialAd? = null
     private var isAdLoading = false
     private var isInitialized = false
+
+    /**
+     * Determines whether the user is located in a high-eCPM Tier 1 market where rewarded ad revenue covers API scan costs.
+     */
+    fun isTier1Market(context: Context): Boolean {
+        return try {
+            val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+            val networkCountry = telephonyManager?.networkCountryIso?.uppercase(Locale.US)
+            val simCountry = telephonyManager?.simCountryIso?.uppercase(Locale.US)
+            val localeCountry = Locale.getDefault().country.uppercase(Locale.US)
+
+            val resolvedCountry = when {
+                !networkCountry.isNullOrBlank() -> networkCountry
+                !simCountry.isNullOrBlank() -> simCountry
+                else -> localeCountry
+            }
+            TIER_1_MARKET_CODES.contains(resolvedCountry)
+        } catch (e: Exception) {
+            true
+        }
+    }
 
     /**
      * Initializes MobileAds on a background thread and pre-fetches the first rewarded ad.
@@ -69,7 +96,7 @@ object AdManager {
 
     /**
      * Displays the Rewarded Interstitial ad.
-     * Guarantees scan execution occurs strictly on user reward or as fallback if ad display fails.
+     * Guarantees scan execution or reward credit occurs strictly on user reward or as fallback if ad display fails.
      */
     fun showRewardedGate(
         activity: Activity,
