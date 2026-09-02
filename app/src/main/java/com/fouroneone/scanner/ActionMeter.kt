@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
@@ -35,25 +34,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.util.Locale
 
-/**
- * Action Meter score display gauge with 0-10 calibrated scale spectrum and verdict visual badge.
- */
 @Composable
 fun ActionMeter(
-    score: Int,
+    score: Double,
     verdictBadge: String,
     modifier: Modifier = Modifier
 ) {
-    val normalizedScore = score.coerceIn(0, 10)
-    val badgeColor = getActionMeterColor(normalizedScore)
-    val badgeIcon = getActionMeterIcon(normalizedScore)
+    val badgeColor = getActionMeterColor(score)
+    val badgeIcon = getActionMeterIcon(score)
 
     Card(
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(14.dp),
         border = BorderStroke(1.5.dp, badgeColor.copy(alpha = 0.5f))
     ) {
@@ -75,7 +69,7 @@ fun ActionMeter(
                     color = MaterialTheme.colorScheme.outline
                 )
                 Text(
-                    text = "SCORE: $normalizedScore / 10",
+                    text = String.format(Locale.US, "SCORE: %.1f / 10", score),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Black,
                     color = badgeColor
@@ -85,11 +79,35 @@ fun ActionMeter(
             Spacer(modifier = Modifier.height(14.dp))
 
             // 5-Zone Spectrum Bar
-            SpectrumScaleBar(currentScore = normalizedScore)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(10.dp)
+                    .clip(RoundedCornerShape(5.dp))
+            ) {
+                Box(modifier = Modifier.weight(3f).background(Color(0xFF2E7D32))) // 0-2 Safe
+                Box(modifier = Modifier.weight(2f).background(Color(0xFF757575))) // 3-4 Solid
+                Box(modifier = Modifier.weight(1f).background(Color(0xFFF9A825))) // 5 Tribe
+                Box(modifier = Modifier.weight(2f).background(Color(0xFFE65100))) // 6-7 Narrow
+                Box(modifier = Modifier.weight(3f).background(Color(0xFFC62828))) // 8-10 Delete
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(text = "0-2 Safe", fontSize = 10.sp, color = Color(0xFF2E7D32))
+                Text(text = "3-4 Solid", fontSize = 10.sp, color = Color(0xFF757575))
+                Text(text = "5 Tribe", fontSize = 10.sp, color = Color(0xFFF9A825))
+                Text(text = "6-7 Narrow", fontSize = 10.sp, color = Color(0xFFE65100))
+                Text(text = "8-10 Delete", fontSize = 10.sp, color = Color(0xFFC62828))
+            }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Prominent Verdict Badge Banner
+            // Action Verdict Badge
             Surface(
                 shape = RoundedCornerShape(10.dp),
                 color = badgeColor.copy(alpha = 0.12f),
@@ -103,15 +121,10 @@ fun ActionMeter(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
-                    Icon(
-                        imageVector = badgeIcon,
-                        contentDescription = null,
-                        tint = badgeColor,
-                        modifier = Modifier.size(22.dp)
-                    )
+                    Icon(imageVector = badgeIcon, contentDescription = null, tint = badgeColor, modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = verdictBadge.ifBlank { getDefaultVerdict(normalizedScore) },
+                        text = verdictBadge.ifBlank { getDefaultVerdict(score) },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.ExtraBold,
                         color = badgeColor
@@ -121,95 +134,43 @@ fun ActionMeter(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            ActionMeterDescription(score = normalizedScore, color = badgeColor)
+            val description = when {
+                score < 3.0 -> "Universal utility. Open baseline software fit for anyone."
+                score < 5.0 -> "Solid baseline. Standard mechanics and transparent trade-offs."
+                score < 6.0 -> "Your Tribe. Built for a specific community or specialized workflow."
+                score < 8.0 -> "Not for everyone. High entry hurdles, pushy funnels, or narrow utility."
+                else -> "Extreme local battery, data, or financial drain."
+            }
+
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
 
-@Composable
-private fun SpectrumScaleBar(currentScore: Int) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(12.dp)
-                .clip(RoundedCornerShape(6.dp))
-        ) {
-            Box(modifier = Modifier.weight(3f).background(Color(0xFF2E7D32))) // 0-2 (Green / Download)
-            Box(modifier = Modifier.weight(2f).background(Color(0xFFFBC02D))) // 3-4 (Yellow / Context)
-            Box(modifier = Modifier.weight(1f).background(Color(0xFFF57C00))) // 5 (Orange / Solid)
-            Box(modifier = Modifier.weight(2f).background(Color(0xFFD32F2F))) // 6-7 (Red / High Friction)
-            Box(modifier = Modifier.weight(3f).background(Color(0xFF212121))) // 8-10 (Black / Delete)
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        // Scale Labels
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text(text = "0 Safe", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = Color(0xFF2E7D32))
-            Text(text = "3-4 Context", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = Color(0xFFFBC02D))
-            Text(text = "5 Solid", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = Color(0xFFF57C00))
-            Text(text = "6-7 Friction", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = Color(0xFFD32F2F))
-            Text(text = "8-10 Delete", style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = Color(0xFF212121))
-        }
-    }
+fun getActionMeterColor(score: Double): Color = when {
+    score < 3.0 -> Color(0xFF2E7D32)
+    score < 5.0 -> Color(0xFF5A5A5A)
+    score < 6.0 -> Color(0xFFF9A825)
+    score < 8.0 -> Color(0xFFE65100)
+    else -> Color(0xFFC62828)
 }
 
-@Composable
-fun ActionMeterDescription(score: Int, color: Color) {
-    val description = when (score) {
-        in 0..2 -> "Universal fit. Clean utility or official consumer tool."
-        in 3..4 -> "Niche fit. Built for a specific purpose or workflow."
-        5 -> "Solid baseline. Standard mechanics and transparent trade-offs."
-        in 6..7 -> "High friction. Aggressive pushy funnels or heavy ad loads."
-        in 8..10 -> "Severe hazard or predatory monetization architecture."
-        else -> "Severe hazard. Structural friction present."
-    }
-    Text(
-        text = description,
-        style = MaterialTheme.typography.bodySmall,
-        textAlign = TextAlign.Center,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
+fun getActionMeterIcon(score: Double): ImageVector = when {
+    score < 3.0 -> Icons.Default.CheckCircle
+    score < 6.0 -> Icons.Default.Info
+    score < 8.0 -> Icons.Default.Warning
+    else -> Icons.Default.Dangerous
 }
 
-fun getActionMeterColor(score: Int): Color {
-    return when {
-        score <= 2 -> Color(0xFF2E7D32) // Green
-        score <= 4 -> Color(0xFFFBC02D) // Yellow
-        score == 5 -> Color(0xFFF57C00) // Orange
-        score <= 7 -> Color(0xFFD32F2F) // Red
-        else -> Color(0xFF212121)       // Black / Dark
-    }
-}
-
-fun getActionMeterIcon(score: Int): ImageVector {
-    return when {
-        score <= 2 -> Icons.Default.CheckCircle
-        score <= 4 -> Icons.Default.Info
-        score == 5 -> Icons.Default.Info
-        score <= 7 -> Icons.Default.Warning
-        else -> Icons.Default.Dangerous
-    }
-}
-
-fun getDefaultVerdict(score: Int): String {
-    return when {
-        score <= 2 -> "DOWNLOAD IT"
-        score <= 4 -> "DOWNLOAD WITH CONTEXT"
-        score == 5 -> "SOLID APP"
-        score <= 7 -> "HIGH FRICTION / SKIP"
-        else -> "DELETE FROM EARTH"
-    }
-}
-
-fun getVectorScoreColor(score: Int, isFriction: Boolean): Color {
-    return if (isFriction) {
-        if (score >= 7) Color(0xFFD32F2F) else if (score >= 4) Color(0xFFF57C00) else Color(0xFF2E7D32)
-    } else {
-        if (score >= 7) Color(0xFF2E7D32) else if (score >= 4) Color(0xFFF57C00) else Color(0xFFD32F2F)
-    }
+fun getDefaultVerdict(score: Double): String = when {
+    score < 3.0 -> "DOWNLOAD IT"
+    score < 5.0 -> "DOWNLOAD WITH CONTEXT"
+    score < 6.0 -> "YOUR TRIBE"
+    score < 8.0 -> "HIGH FRICTION / SKIP"
+    else -> "DELETE FROM DEVICE"
 }

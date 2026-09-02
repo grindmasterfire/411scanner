@@ -24,12 +24,16 @@ data class MetricAnnotations(
 data class ConsumerCard(
     val targetName: String = "Unknown Target",
     val developerOrEntity: String = "Not Identified",
+    val interfaceSurface: String = "",
+    val classificationBadges: List<String> = emptyList(),
     val metrics: Metrics = Metrics(),
     val metricAnnotations: MetricAnnotations = MetricAnnotations(),
     val actionMeterScore: Double = 5.0,
-    val actionVerdictBadge: String = "⚪ SOLID APP",
-    val the411BottomLine: String = "",
-    val deepDiveAnalysis: String? = null
+    val actionVerdictBadge: String = "MOSTLY_FOR_EVERYONE",
+    val verdictLabel: String = "MOSTLY FOR EVERYONE",
+    val tagline: String = "",
+    val essential411: String = "",
+    val secondaryTargetsNote: String = ""
 )
 
 data class NetworkTelemetry(
@@ -37,47 +41,54 @@ data class NetworkTelemetry(
     val hostCdn: String = "",
     val domainAgeDays: Int? = null,
     val tlsCertificateStatus: String? = null,
-    val archetypeBadge: String = "CLEAN_INDIE",
     val groundingSources: List<String> = emptyList()
 )
 
-data class SdkFingerprints(
-    val adMediationNetworks: List<String> = emptyList(),
-    val creativeContainerType: String = "",
-    val tapInterceptionBehavior: String = ""
+data class Monetization(
+    val revenueModel: String = "",
+    val pricing: String = "",
+    val affiliateDisclosure: String = "",
+    val guaranteeTerms: String = ""
 )
 
-data class MonetizationMathematics(
-    val monetizationModel: String = "",
-    val effectiveAdLoad: String = "",
-    val decayMechanicDetected: Boolean = false,
-    val requiredAdViewsOrCost: String = ""
-)
-
-data class RegulatoryCodes(
-    val primaryPolicyViolation: String = "",
-    val ftcRuleMapping: String = "",
-    val enforcementAgencyEndpoint: String = ""
+data class RegulatoryRecord(
+    val licenseStatus: String = "",
+    val bbbRecord: String = "",
+    val ftcRecord: String = "",
+    val complaintPattern: String = "",
+    val reviewSpread: String = ""
 )
 
 data class TechnicalLedger(
     val networkTelemetry: NetworkTelemetry = NetworkTelemetry(),
-    val sdkFingerprints: SdkFingerprints = SdkFingerprints(),
-    val manifestPermissions: List<String> = emptyList(),
-    val monetizationMathematics: MonetizationMathematics = MonetizationMathematics(),
-    val regulatoryCodes: RegulatoryCodes = RegulatoryCodes(),
+    val monetization: Monetization = Monetization(),
+    val regulatoryRecord: RegulatoryRecord = RegulatoryRecord(),
     val technicalFlags: List<String> = emptyList()
 )
 
-data class AlternativesAndLedger(
-    val recommendedAlternatives: List<String> = emptyList(),
+data class Alternative(
+    val name: String = "",
+    val scoreEstimate: String = "",
+    val description: String = ""
+)
+
+data class VerifiedLinks(
+    val officialSite: String = "",
+    val realPhone: String = "",
+    val realEmail: String = ""
+)
+
+data class Alternatives(
+    val renders: Boolean = false,
+    val verifiedLinks: VerifiedLinks = VerifiedLinks(),
+    val recommendedAlternatives: List<Alternative> = emptyList(),
     val communityTags: List<String> = emptyList()
 )
 
 data class ScanReport(
     val consumerCard: ConsumerCard = ConsumerCard(),
     val technicalLedger: TechnicalLedger = TechnicalLedger(),
-    val alternativesAndLedger: AlternativesAndLedger = AlternativesAndLedger()
+    val alternatives: Alternatives = Alternatives()
 ) {
     companion object {
         fun fromJson(jsonString: String): ScanReport? {
@@ -96,14 +107,6 @@ data class ScanReport(
 
                 // Consumer Card
                 val ccObj = reportObj.optJSONObject("consumer_card") ?: JSONObject()
-                val targetName = ccObj.optString("target_name", "Unknown Target")
-                val devOrEntity = ccObj.optString("developer_or_entity", "Not Identified")
-                val actionScore = ccObj.optDouble("action_meter_score", 5.0)
-                val actionBadge = ccObj.optString("action_verdict_badge", "⚪ SOLID APP")
-                val bottomLine = ccObj.optString("the411BottomLine", ccObj.optString("the_411_bottom_line", ""))
-                val deepDive = if (ccObj.has("deep_dive_analysis") && !ccObj.isNull("deep_dive_analysis")) {
-                    ccObj.optString("deep_dive_analysis")
-                } else null
 
                 val metricsObj = ccObj.optJSONObject("metrics") ?: JSONObject()
                 val metrics = Metrics(
@@ -125,82 +128,98 @@ data class ScanReport(
                     honestPricingNote = noteObj.optString("honest_pricing_note", "")
                 )
 
+                val badgesArray = ccObj.optJSONArray("classification_badges")
+                val classificationBadges = jsonArrayToList(badgesArray)
+
                 val consumerCard = ConsumerCard(
-                    targetName = targetName,
-                    developerOrEntity = devOrEntity,
+                    targetName = ccObj.optString("target_name", "Unknown Target"),
+                    developerOrEntity = ccObj.optString("developer_or_entity", "Not Identified"),
+                    interfaceSurface = ccObj.optString("interface_surface", ""),
+                    classificationBadges = classificationBadges,
                     metrics = metrics,
                     metricAnnotations = metricNotes,
-                    actionMeterScore = actionScore,
-                    actionVerdictBadge = actionBadge,
-                    the411BottomLine = bottomLine,
-                    deepDiveAnalysis = deepDive
+                    actionMeterScore = ccObj.optDouble("action_meter_score", 5.0),
+                    actionVerdictBadge = ccObj.optString("action_verdict_badge", "MOSTLY_FOR_EVERYONE"),
+                    verdictLabel = ccObj.optString("verdict_label", "MOSTLY FOR EVERYONE"),
+                    tagline = ccObj.optString("tagline", ""),
+                    essential411 = ccObj.optString("essential_411", ""),
+                    secondaryTargetsNote = ccObj.optString("secondary_targets_note", "")
                 )
 
                 // Technical Ledger
                 val tlObj = reportObj.optJSONObject("technical_ledger") ?: JSONObject()
 
                 val ntObj = tlObj.optJSONObject("network_telemetry") ?: JSONObject()
-                val domainAge = if (ntObj.has("domain_age_days") && !ntObj.isNull("domain_age_days")) {
-                    ntObj.optInt("domain_age_days")
-                } else null
-                val tlsStatus = if (ntObj.has("tls_certificate_status") && !ntObj.isNull("tls_certificate_status")) {
-                    ntObj.optString("tls_certificate_status")
-                } else null
                 val networkTelemetry = NetworkTelemetry(
                     appPackageOrDomain = ntObj.optString("app_package_or_domain", ""),
                     hostCdn = ntObj.optString("host_cdn", ""),
-                    domainAgeDays = domainAge,
-                    tlsCertificateStatus = tlsStatus,
-                    archetypeBadge = ntObj.optString("archetype_badge", "CLEAN_INDIE"),
+                    domainAgeDays = if (!ntObj.isNull("domain_age_days")) ntObj.optInt("domain_age_days") else null,
+                    tlsCertificateStatus = if (!ntObj.isNull("tls_certificate_status")) ntObj.optString("tls_certificate_status") else null,
                     groundingSources = jsonArrayToList(ntObj.optJSONArray("grounding_sources"))
                 )
 
-                val sdkObj = tlObj.optJSONObject("sdk_fingerprints") ?: JSONObject()
-                val sdkFingerprints = SdkFingerprints(
-                    adMediationNetworks = jsonArrayToList(sdkObj.optJSONArray("ad_mediation_networks")),
-                    creativeContainerType = sdkObj.optString("creative_container_type", ""),
-                    tapInterceptionBehavior = sdkObj.optString("tap_interception_behavior", "")
+                val monObj = tlObj.optJSONObject("monetization") ?: JSONObject()
+                val monetization = Monetization(
+                    revenueModel = monObj.optString("revenue_model", ""),
+                    pricing = monObj.optString("pricing", ""),
+                    affiliateDisclosure = monObj.optString("affiliate_disclosure", ""),
+                    guaranteeTerms = monObj.optString("guarantee_terms", "")
                 )
 
-                val manifestPermissions = jsonArrayToList(tlObj.optJSONArray("manifest_permissions"))
-
-                val mmObj = tlObj.optJSONObject("monetization_mathematics") ?: JSONObject()
-                val monetizationMath = MonetizationMathematics(
-                    monetizationModel = mmObj.optString("monetization_model", ""),
-                    effectiveAdLoad = mmObj.optString("effective_ad_load", ""),
-                    decayMechanicDetected = mmObj.optBoolean("decay_mechanic_detected", false),
-                    requiredAdViewsOrCost = mmObj.optString("required_ad_views_or_cost", "")
+                val regObj = tlObj.optJSONObject("regulatory_record") ?: JSONObject()
+                val regulatoryRecord = RegulatoryRecord(
+                    licenseStatus = regObj.optString("license_status", ""),
+                    bbbRecord = regObj.optString("bbb_record", ""),
+                    ftcRecord = regObj.optString("ftc_record", ""),
+                    complaintPattern = regObj.optString("complaint_pattern", ""),
+                    reviewSpread = regObj.optString("review_spread", "")
                 )
-
-                val regObj = tlObj.optJSONObject("regulatory_codes") ?: JSONObject()
-                val regulatoryCodes = RegulatoryCodes(
-                    primaryPolicyViolation = regObj.optString("primary_policy_violation", ""),
-                    ftcRuleMapping = regObj.optString("ftc_rule_mapping", ""),
-                    enforcementAgencyEndpoint = regObj.optString("enforcement_agency_endpoint", "")
-                )
-
-                val technicalFlags = jsonArrayToList(tlObj.optJSONArray("technical_flags"))
 
                 val technicalLedger = TechnicalLedger(
                     networkTelemetry = networkTelemetry,
-                    sdkFingerprints = sdkFingerprints,
-                    manifestPermissions = manifestPermissions,
-                    monetizationMathematics = monetizationMath,
-                    regulatoryCodes = regulatoryCodes,
-                    technicalFlags = technicalFlags
+                    monetization = monetization,
+                    regulatoryRecord = regulatoryRecord,
+                    technicalFlags = jsonArrayToList(tlObj.optJSONArray("technical_flags"))
                 )
 
-                // Alternatives & Ledger
-                val alObj = reportObj.optJSONObject("alternatives_and_ledger") ?: JSONObject()
-                val alternativesAndLedger = AlternativesAndLedger(
-                    recommendedAlternatives = jsonArrayToList(alObj.optJSONArray("recommended_alternatives")),
-                    communityTags = jsonArrayToList(alObj.optJSONArray("community_tags"))
+                // Alternatives
+                val altObj = reportObj.optJSONObject("alternatives") ?: JSONObject()
+
+                val linksObj = altObj.optJSONObject("verified_links") ?: JSONObject()
+                val verifiedLinks = VerifiedLinks(
+                    officialSite = linksObj.optString("official_site", ""),
+                    realPhone = linksObj.optString("real_phone", ""),
+                    realEmail = linksObj.optString("real_email", "")
+                )
+
+                val altArray = altObj.optJSONArray("recommended_alternatives")
+                val recommendedAlternatives = mutableListOf<Alternative>()
+                if (altArray != null) {
+                    for (i in 0 until altArray.length()) {
+                        val item = altArray.optJSONObject(i)
+                        if (item != null) {
+                            recommendedAlternatives.add(
+                                Alternative(
+                                    name = item.optString("name", ""),
+                                    scoreEstimate = item.optString("score_estimate", ""),
+                                    description = item.optString("description", "")
+                                )
+                            )
+                        }
+                    }
+                }
+
+                val alternatives = Alternatives(
+                    renders = altObj.optBoolean("renders", false),
+                    verifiedLinks = verifiedLinks,
+                    recommendedAlternatives = recommendedAlternatives,
+                    communityTags = jsonArrayToList(altObj.optJSONArray("community_tags"))
                 )
 
                 ScanReport(
                     consumerCard = consumerCard,
                     technicalLedger = technicalLedger,
-                    alternativesAndLedger = alternativesAndLedger
+                    alternatives = alternatives
                 )
             } catch (e: Exception) {
                 null
@@ -212,9 +231,7 @@ data class ScanReport(
             val list = mutableListOf<String>()
             for (i in 0 until array.length()) {
                 val item = array.optString(i)
-                if (item.isNotBlank()) {
-                    list.add(item)
-                }
+                if (item.isNotBlank()) list.add(item)
             }
             return list
         }

@@ -1,5 +1,6 @@
 package com.fouroneone.scanner
 
+import androidx.compose.material.icons.automirrored.filled.Logout
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -196,7 +197,7 @@ fun AuthDialog(
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(imageVector = Icons.Default.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(imageVector = Icons.AutoMirrored.Filled.Logout, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Sign Out")
                     }

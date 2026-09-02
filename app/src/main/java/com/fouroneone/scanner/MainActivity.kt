@@ -11,11 +11,29 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -113,14 +131,23 @@ fun ScannerMainScreen(incomingUri: Uri?, onClearUri: () -> Unit) {
     }
 
     if (scanResult != null) {
-        ResultScreen(
-            rawJson = scanResult!!,
-            onDismiss = {
-                scanResult = null
-                refreshRecentScans()
-            }
-        )
-        return
+        val parsedReport = remember(scanResult) {
+            ScanReport.fromJson(scanResult!!)
+        }
+
+        if (parsedReport != null) {
+            ResultScreen(
+                report = parsedReport,
+                onBackClick = {
+                    scanResult = null
+                    refreshRecentScans()
+                },
+                onRequestDeepDive = {
+                    ScanRepository.deepDive(parsedReport)
+                }
+            )
+            return
+        }
     }
 
     fun executeScan(b64: String) {
@@ -145,7 +172,9 @@ fun ScannerMainScreen(incomingUri: Uri?, onClearUri: () -> Unit) {
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text(text = "411 Scanner", fontWeight = FontWeight.Bold) },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
             )
         }
     ) { innerPadding ->
@@ -174,7 +203,11 @@ fun ScannerMainScreen(incomingUri: Uri?, onClearUri: () -> Unit) {
                 isLoading = isLoading,
                 isConverting = isConverting,
                 scanError = scanError,
-                onPickImage = { photoPickerLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                onPickImage = {
+                    photoPickerLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                },
                 onRunScan = {
                     val currentB64 = base64String
                     if (!currentB64.isNullOrEmpty() && !isLoading) {
@@ -191,14 +224,22 @@ fun ScannerMainScreen(incomingUri: Uri?, onClearUri: () -> Unit) {
                                 status.isUnlimited && !status.isLifetimeUnlocked -> {
                                     val showAd = QuotaManager.shouldShowAdForRental(context)
                                     if (showAd && activity != null) {
-                                        AdManager.showRewardedGate(activity = activity, onRewardEarned = { executeScan(currentB64) }, onAdUnavailable = { executeScan(currentB64) })
+                                        AdManager.showRewardedGate(
+                                            activity = activity,
+                                            onRewardEarned = { executeScan(currentB64) },
+                                            onAdUnavailable = { executeScan(currentB64) }
+                                        )
                                     } else {
                                         executeScan(currentB64)
                                     }
                                 }
                                 else -> {
                                     if (activity != null) {
-                                        AdManager.showRewardedGate(activity = activity, onRewardEarned = { executeScan(currentB64) }, onAdUnavailable = { executeScan(currentB64) })
+                                        AdManager.showRewardedGate(
+                                            activity = activity,
+                                            onRewardEarned = { executeScan(currentB64) },
+                                            onAdUnavailable = { executeScan(currentB64) }
+                                        )
                                     } else {
                                         executeScan(currentB64)
                                     }

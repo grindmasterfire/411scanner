@@ -1,7 +1,6 @@
 package com.fouroneone.scanner
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -28,11 +27,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/**
- * 6-Vector dual-matrix diagnostic grid rendering Friction & Traps vs Quality & Authenticity.
- */
 @Composable
-fun SixVectorDiagnosticGrid(
+fun SixVectorGrid(
     metrics: Metrics,
     annotations: MetricAnnotations,
     modifier: Modifier = Modifier
@@ -55,26 +51,11 @@ fun SixVectorDiagnosticGrid(
             borderColor = Color(0xFFC62828).copy(alpha = 0.3f),
             isDownward = true
         ) {
-            VectorMetricCard(
-                title = "Financial Risk",
-                score = metrics.financialRisk,
-                note = annotations.financialRiskNote,
-                isFriction = true
-            )
+            VectorMetricCard(title = "Financial Risk", score = metrics.financialRisk, note = annotations.financialRiskNote, isFriction = true)
             Spacer(modifier = Modifier.height(8.dp))
-            VectorMetricCard(
-                title = "Personal Data Exposure",
-                score = metrics.personalDataExposure,
-                note = annotations.personalDataNote,
-                isFriction = true
-            )
+            VectorMetricCard(title = "Personal Data Exposure", score = metrics.personalDataExposure, note = annotations.personalDataNote, isFriction = true)
             Spacer(modifier = Modifier.height(8.dp))
-            VectorMetricCard(
-                title = "Wasted Time & Ads",
-                score = metrics.wastedTimeAndAds,
-                note = annotations.wastedTimeNote,
-                isFriction = true
-            )
+            VectorMetricCard(title = "Wasted Time & Ads", score = metrics.wastedTimeAndAds, note = annotations.wastedTimeNote, isFriction = true)
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -87,26 +68,11 @@ fun SixVectorDiagnosticGrid(
             borderColor = Color(0xFF2E7D32).copy(alpha = 0.3f),
             isDownward = false
         ) {
-            VectorMetricCard(
-                title = "Real Substance",
-                score = metrics.realSubstance,
-                note = annotations.realSubstanceNote,
-                isFriction = false
-            )
+            VectorMetricCard(title = "Real Substance", score = metrics.realSubstance, note = annotations.realSubstanceNote, isFriction = false)
             Spacer(modifier = Modifier.height(8.dp))
-            VectorMetricCard(
-                title = "Offline Independence",
-                score = metrics.offlineIndependence,
-                note = annotations.offlineIndependenceNote,
-                isFriction = false
-            )
+            VectorMetricCard(title = "Offline Independence", score = metrics.offlineIndependence, note = annotations.offlineIndependenceNote, isFriction = false)
             Spacer(modifier = Modifier.height(8.dp))
-            VectorMetricCard(
-                title = "Honest Pricing",
-                score = metrics.honestPricing,
-                note = annotations.honestPricingNote,
-                isFriction = false
-            )
+            VectorMetricCard(title = "Honest Pricing", score = metrics.honestPricing, note = annotations.honestPricingNote, isFriction = false)
         }
     }
 }
@@ -151,36 +117,31 @@ private fun MatrixSection(
 }
 
 @Composable
-fun VectorMetricCard(
+private fun VectorMetricCard(
     title: String,
     score: Int,
     note: String,
-    isFriction: Boolean,
-    modifier: Modifier = Modifier
+    isFriction: Boolean
 ) {
-    val chipColor = getVectorScoreColor(score, isFriction)
+    val chipColor = if (isFriction) {
+        if (score >= 7) Color(0xFFD32F2F) else if (score >= 4) Color(0xFFF57C00) else Color(0xFF2E7D32)
+    } else {
+        if (score >= 7) Color(0xFF2E7D32) else if (score >= 4) Color(0xFFF57C00) else Color(0xFFD32F2F)
+    }
 
     Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        ),
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(8.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(10.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.weight(1f)
-                )
+                Text(text = title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
                 Surface(
                     shape = RoundedCornerShape(6.dp),
                     color = chipColor,
@@ -191,19 +152,18 @@ fun VectorMetricCard(
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.ExtraBold,
                         color = Color.White,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                     )
                 }
             }
-
             if (note.isNotBlank()) {
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = note,
                     style = MaterialTheme.typography.bodySmall,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    lineHeight = 16.sp
+                    lineHeight = 15.sp
                 )
             }
         }
