@@ -1,178 +1,330 @@
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
+/**
+ * 411 SCANNER — Production Function Entry Point
+ * Architecture: Class 4 — Complex System / Router
+ * Responsibility: Expose production scan, Deep Dive, and token QA.
+ * Cap: 600 lines
+ *
+ * Security:
+ * - Server owns final score and verdict.
+ * - Cache Bank stores completed scan reports.
+ * - Solicitation identity remains separate from T03 pattern identity.
+ */
 
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 
-const { buildCacheKey, getCachedScanReport, setCachedScanReport } = require("./cacheLayer");
+const {
+  buildCacheKey,
+  getCachedScanReport,
+  setCachedScanReport,
+} = require("./cacheLayer");
 
-const { analyzeImageWithGemini, generateDeepDive } = require("./geminiEngine");
+const {
+  getCachedDeepDive,
+  setCachedDeepDive,
+} = require("./deepDiveCacheLayer");
+
+const {
+  analyzeImageWithGemini,
+} = require("./geminiEngine");
+
+const {
+  generateDeepDive,
+} = require("./deepDiveEngine");
+
+const {
+  buildSolicitationIdentityKey,
+  getSolicitationHistory,
+  saveSolicitationHistory,
+} = require("./solicitationIdentity");
 
 admin.initializeApp();
 
 const db = admin.firestore();
 
 /**
- * Primary scan function — 2,000 token budget, results cached in Firestore.
+ * Extract the confirmed/related solicitation identity fields from
+ * the authoritative Gemini scan report.
+ *
+ * T03 pattern identity is intentionally not handled here.
  */
+function extractSolicitationIdentity(report) {
+  const identity = report?.solicitation_identity;
 
+  if (!identity || typeof identity !== "object") {
+    return null;
+  }
+
+  return {
+    canonicalName: identity.canonical_name || null,
+    operator: identity.operator || null,
+    destinationDomain: identity.destination_domain || null,
+    destinationPath: identity.destination_path || null,
+    offerMechanic: identity.offer_mechanic || null,
+    confidence: identity.confidence || "unknown",
+  };
+}
+
+/**
+ * Production scan endpoint.
+ *
+ * Pipeline:
+ * Screenshot/OCR
+ * → Cache Bank
+ * → Gemini grounded analysis
+ * → Solicitation identity continuity
+ * → Cache Bank archival
+ * → Client
+ */
 exports.scan = onCall(
   {
+    region: "us-central1",
     timeoutSeconds: 120,
-    memory: "512MiB",
-    cors: true
+    memory: "1GiB",
   },
   async (request) => {
-    try {
-      const data = request.data;
+    const data = request.data || {};
 
-      const rawImage =
-        (data && data.image) ||
-        (data && data.data && data.data.image) ||
-        (typeof data === "string" ? data : null);
+    const imageBase64 = data.imageBase64;
+    const mimeType = data.mimeType || "image/jpeg";
+    const ocrText = data.ocrText || "";
+    const prompt = data.prompt || "";
 
-      const mimeType =
-        (data && data.mimeType) ||
-        (data && data.data && data.data.mimeType) ||
-        "image/jpeg";
-
-      if (!rawImage) {
-        console.error("411 Scanner rejected payload. Keys:", Object.keys(data || {}));
-        throw new HttpsError(
-          "invalid-argument",
-          "The function must be called with a base64 encoded 'image' string."
-        );
-      }
-
-      const cleanBase64 = rawImage.replace(/^data\:image\/\w+;base64,/, "");
-
-      const ocrTokens =
-        (data && data.ocrTokens) ||
-        (data && data.data && data.data.ocrTokens);
-
-      const cacheKey = buildCacheKey(cleanBase64, ocrTokens);
-
-      const cachedReport = await getCachedScanReport(db, cacheKey);
-
-      if (cachedReport) {
-        return {
-          status: "ok",
-          report: cachedReport,
-          cached: true
-        };
-      }
-
-      const apiKey = process.env.GEMINI_API_KEY;
-
-      if (!apiKey) {
-        throw new HttpsError(
-          "failed-precondition",
-          "GEMINI_API_KEY is not configured in the environment."
-        );
-      }
-
-      const prompt =
-        (data && data.prompt) ||
-        (data && data.data && data.data.prompt);
-
-      const { report: parsedReport, telemetry } =
-        await analyzeImageWithGemini(
-          apiKey,
-          cleanBase64,
-          mimeType,
-          prompt
-        );
-
-      await setCachedScanReport(
-        db,
-        cacheKey,
-        parsedReport,
-        admin.firestore.FieldValue.serverTimestamp(),
-        telemetry
-      );
-
-      return {
-        status: "ok",
-        report: parsedReport,
-        cached: false
-      };
-    } catch (error) {
-      if (error instanceof HttpsError) throw error;
-
-      console.error("411 Scanner scan error:", error);
-
+    if (!imageBase64) {
       throw new HttpsError(
-        "internal",
-        error.message || "Scan failed."
+        "invalid-argument",
+        "An image is required."
       );
     }
+
+    const cacheKey = buildCacheKey(
+      imageBase64,
+      ocrText
+    );
+
+    const cachedReport =
+      await getCachedScanReport(
+        db,
+        cacheKey
+      );
+
+    if (cachedReport) {
+      return {
+        report: cachedReport,
+        cache: {
+          hit: true,
+          key: cacheKey,
+        },
+      };
+    }
+
+    const apiKey =
+      process.env.GEMINI_API_KEY ||
+      process.env.GOOGLE_GEMINI_API_KEY;
+
+    if (!apiKey) {
+      throw new HttpsError(
+        "failed-precondition",
+        "Gemini API key is not configured."
+      );
+    }
+
+    const result =
+      await analyzeImageWithGemini(
+        apiKey,
+        imageBase64,
+        mimeType,
+        prompt
+      );
+
+    const report = result.report;
+    const telemetry = result.telemetry;
+
+    /*
+     * Existing confirmed/related solicitation identity continuity.
+     *
+     * IMPORTANT T03 BOUNDARY:
+     * solicitation_pattern is intentionally NOT read here.
+     *
+     * Pattern recognition may produce a pattern_key or pattern_only
+     * finding, but it cannot establish actor identity.
+     *
+     * Only the independently grounded solicitation_identity object
+     * enters the confirmed solicitation-identity machinery.
+     */
+    const solicitationIdentity =
+      extractSolicitationIdentity(report);
+
+    let identityHistory = null;
+
+    if (solicitationIdentity) {
+      const identityKey =
+        buildSolicitationIdentityKey(
+          solicitationIdentity
+        );
+
+      if (identityKey) {
+        identityHistory =
+          await getSolicitationHistory(
+            db,
+            identityKey
+          );
+
+        await saveSolicitationHistory(
+          db,
+          identityKey,
+          solicitationIdentity,
+          cacheKey,
+          admin.firestore.FieldValue.serverTimestamp()
+        );
+      }
+    }
+
+    /*
+     * Cache the completed scan report.
+     *
+     * The complete normalized T03 solicitation_pattern,
+     * including deterministic pattern_key, lives inside report
+     * and is therefore preserved by the existing Cache Bank.
+     *
+     * No second T03 cache or identity system is created.
+     * Historical pattern retrieval remains a T04 responsibility.
+     */
+    await setCachedScanReport(
+      db,
+      cacheKey,
+      report,
+      admin.firestore.FieldValue.serverTimestamp(),
+      telemetry
+    );
+
+    return {
+      report,
+      cache: {
+        hit: false,
+        key: cacheKey,
+      },
+      telemetry,
+      solicitationIdentity,
+      identityHistory,
+    };
   }
 );
 
 /**
- * Deep Dive function — on demand, 1,000 token budget, never cached.
- * Called only when user taps "Would You Like To Know More?"
+ * Production Deep Dive endpoint.
+ *
+ * Deep Dive execution is isolated in deepDiveEngine.js.
+ * This router owns request validation and Deep Dive caching only.
  */
-
 exports.deepDive = onCall(
   {
-    timeoutSeconds: 60,
-    memory: "256MiB",
-    cors: true
+    region: "us-central1",
+    timeoutSeconds: 120,
+    memory: "1GiB",
   },
   async (request) => {
-    try {
-      const data = request.data;
-      const payload = data && data.data ? data.data : data;
+    const data = request.data || {};
 
-      const targetName = payload && payload.targetName;
+    const targetName = data.targetName;
+    const cacheKey = data.cacheKey;
+    const originalReport = data.report;
 
-      if (!targetName) {
-        throw new HttpsError(
-          "invalid-argument",
-          "targetName is required for deep dive."
-        );
-      }
+    if (!targetName) {
+      throw new HttpsError(
+        "invalid-argument",
+        "A target name is required."
+      );
+    }
 
-      const apiKey = process.env.GEMINI_API_KEY;
+    if (!cacheKey) {
+      throw new HttpsError(
+        "invalid-argument",
+        "A cache key is required."
+      );
+    }
 
-      if (!apiKey) {
-        throw new HttpsError(
-          "failed-precondition",
-          "GEMINI_API_KEY is not configured in the environment."
-        );
-      }
-
-      const reportSummary = {
-        targetName: targetName,
-        actionMeterScore: payload.actionMeterScore || 0,
-        verdictLabel: payload.verdictLabel || "",
-        essential411: payload.essential411 || "",
-        classificationBadges: payload.classificationBadges || "",
-        revenueModel: payload.revenueModel || "",
-        pricing: payload.pricing || "",
-        complaintPattern: payload.complaintPattern || "",
-        reviewSpread: payload.reviewSpread || "",
-        technicalFlags: payload.technicalFlags || ""
-      };
-
-      const deepDiveText = await generateDeepDive(
-        apiKey,
-        reportSummary,
+    const cachedDeepDive =
+      await getCachedDeepDive(
+        cacheKey,
         targetName
       );
 
+    if (cachedDeepDive) {
       return {
-        status: "ok",
-        result: deepDiveText
+        deepDive: cachedDeepDive,
+        cache: {
+          hit: true,
+        },
       };
-    } catch (error) {
-      if (error instanceof HttpsError) throw error;
+    }
 
-      console.error("411 Scanner deep dive error:", error);
+    const apiKey =
+      process.env.GEMINI_API_KEY ||
+      process.env.GOOGLE_GEMINI_API_KEY;
 
+    if (!apiKey) {
       throw new HttpsError(
-        "internal",
-        error.message || "Deep dive failed."
+        "failed-precondition",
+        "Gemini API key is not configured."
       );
     }
+
+    const reportSummary =
+      originalReport || {};
+
+    const {
+      text,
+      telemetry,
+    } = await generateDeepDive(
+      apiKey,
+      reportSummary,
+      targetName
+    );
+
+    await setCachedDeepDive(
+      cacheKey,
+      targetName,
+      text
+    );
+
+    return {
+      deepDive: text,
+      cache: {
+        hit: false,
+      },
+      telemetry,
+    };
+  }
+);
+
+/**
+ * Read-only token QA endpoint.
+ *
+ * This endpoint exists for production telemetry/QA verification
+ * and does not mutate scan intelligence.
+ */
+exports.qaTokens = onCall(
+  {
+    region: "us-central1",
+    timeoutSeconds: 30,
+    memory: "512MiB",
+  },
+  async () => {
+    const snapshot = await db
+      .collection("token_qa")
+      .orderBy("createdAt", "desc")
+      .limit(50)
+      .get();
+
+    const records = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    return {
+      records,
+      count: records.length,
+    };
   }
 );

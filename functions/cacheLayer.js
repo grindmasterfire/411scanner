@@ -2,10 +2,10 @@
  * @file: functions/cacheLayer.js
  * @class: Class 1 (Hooks, Helpers, & Constants)
  * @cap: 150 Lines
- * @responsibility: Build scan cache identities and persist production reports with Gemini telemetry.
+ * @responsibility: Build scan cache identities and persist production scan reports and Gemini telemetry.
  * @dependencies: crypto, firebase-admin
  * @security_gate: Cache persistence only. Does not calculate scores or invoke Gemini.
- * @owner_context: 411 Scanner production cache and calibration telemetry.
+ * @owner_context: 411 Scanner production Cache Bank and calibration telemetry.
  */
 
 const crypto = require("crypto");
@@ -19,6 +19,7 @@ const crypto = require("crypto");
 function buildCacheKey(imageBase64, ocrTokens) {
   const hash = crypto.createHash("sha256");
   hash.update(imageBase64 || "");
+
   if (Array.isArray(ocrTokens) && ocrTokens.length > 0) {
     hash.update(
       "::OCR::" +
@@ -30,6 +31,7 @@ function buildCacheKey(imageBase64, ocrTokens) {
   } else if (typeof ocrTokens === "string" && ocrTokens.trim()) {
     hash.update("::OCR::" + ocrTokens.trim().toLowerCase());
   }
+
   return hash.digest("hex");
 }
 
@@ -42,15 +44,21 @@ function buildCacheKey(imageBase64, ocrTokens) {
 async function getCachedScanReport(db, cacheKey) {
   try {
     const cacheDoc = await db.collection("scan_cache").doc(cacheKey).get();
+
     if (cacheDoc.exists) {
       const cachedData = cacheDoc.data();
+
       if (cachedData && cachedData.report) {
         return cachedData.report;
       }
     }
+
     return null;
   } catch (cacheErr) {
-    console.warn("411 Scanner cache read failed, falling back to Gemini:", cacheErr);
+    console.warn(
+      "411 Scanner cache read failed, falling back to Gemini:",
+      cacheErr
+    );
     return null;
   }
 }

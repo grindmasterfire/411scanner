@@ -1,3 +1,13 @@
+/**
+ * @file: ResultScreen.kt
+ * @class: Class 4 (Router/Layout)
+ * @cap: 600 Lines
+ * @responsibility: Own the diagnostic report shell and route the parsed report into its three result tabs.
+ * @dependencies: Jetpack Compose Material 3, ScanReport, ConsumerCardTab, TechnicalLedgerTab, AlternativesTab
+ * @security_gate: Presentation-only routing. No network calls, persistence, credential handling, or report mutation.
+ * @owner_context: 411 Scanner result presentation after ScanReport parsing.
+ */
+
 package com.fouroneone.scanner
 
 import androidx.compose.foundation.background
@@ -28,6 +38,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
+/**
+ * Hosts the three diagnostic report views and keeps tab state local to the screen.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ResultScreen(
@@ -62,7 +75,9 @@ fun ResultScreen(
                     )
                 }
             },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFFFAFAFE))
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = Color(0xFFFAFAFE)
+            )
         )
 
         TabRow(
@@ -84,8 +99,16 @@ fun ResultScreen(
                         Text(
                             text = title,
                             fontSize = 13.sp,
-                            fontWeight = if (selectedTabIndex == index) FontWeight.Bold else FontWeight.Medium,
-                            color = if (selectedTabIndex == index) Color(0xFF6750A4) else Color(0xFF79747E)
+                            fontWeight = if (selectedTabIndex == index) {
+                                FontWeight.Bold
+                            } else {
+                                FontWeight.Medium
+                            },
+                            color = if (selectedTabIndex == index) {
+                                Color(0xFF6750A4)
+                            } else {
+                                Color(0xFF79747E)
+                            }
                         )
                     }
                 )
@@ -100,12 +123,15 @@ fun ResultScreen(
             when (selectedTabIndex) {
                 0 -> ConsumerCardTab(
                     consumerCard = report.consumerCard,
+                    telemetry = report.telemetry,
                     onRequestDeepDive = onRequestDeepDive
                 )
+
                 1 -> TechnicalLedgerTab(
                     consumerCard = report.consumerCard,
                     technicalLedger = report.technicalLedger
                 )
+
                 2 -> AlternativesTab(
                     consumerCard = report.consumerCard,
                     technicalLedger = report.technicalLedger,

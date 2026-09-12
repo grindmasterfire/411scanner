@@ -17,10 +17,21 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 const limit = Math.max(1, Number(process.argv[2]) || 10);
 
+/**
+ * Formats telemetry counts for terminal readability.
+ */
 function formatNumber(value) {
   return Number(value || 0).toLocaleString("en-US");
 }
 
+/**
+ * Prints one cached scan for calibration inspection.
+ *
+ * Practical Utility is the current diagnostic meaning of the
+ * V1 compatibility field offline_independence.
+ *
+ * Honest Pricing remains unchanged in this task.
+ */
 function printScan(doc) {
   const data = doc.data() || {};
   const report = data.report || {};
@@ -36,24 +47,43 @@ function printScan(doc) {
   console.log(`Verdict: ${card.verdict_label || "unknown"}`);
   console.log("----------------------------------------");
   console.log(`Financial Risk: ${metrics.financial_risk ?? "?"}`);
-  console.log(`Personal Data Exposure: ${metrics.personal_data_exposure ?? "?"}`);
-  console.log(`Wasted Time & Ads: ${metrics.wasted_time_and_ads ?? "?"}`);
+  console.log(
+    `Personal Data Exposure: ${metrics.personal_data_exposure ?? "?"}`
+  );
+  console.log(
+    `Wasted Time & Ads: ${metrics.wasted_time_and_ads ?? "?"}`
+  );
   console.log(`Real Substance: ${metrics.real_substance ?? "?"}`);
-  console.log(`Offline Independence: ${metrics.offline_independence ?? "?"}`);
+  console.log(
+    `Practical Utility: ${metrics.offline_independence ?? "?"}`
+  );
   console.log(`Honest Pricing: ${metrics.honest_pricing ?? "?"}`);
   console.log("----------------------------------------");
   console.log(`Model: ${telemetry.model || "unknown"}`);
   console.log(`Operation: ${telemetry.operation || "unknown"}`);
-  console.log(`Prompt Tokens: ${formatNumber(telemetry.promptTokenCount)}`);
-  console.log(`Output Tokens: ${formatNumber(telemetry.candidatesTokenCount)}`);
-  console.log(`Total Tokens: ${formatNumber(telemetry.totalTokenCount)}`);
-  console.log(`Cached Tokens: ${formatNumber(telemetry.cachedContentTokenCount)}`);
-  console.log(`Thought Tokens: ${formatNumber(telemetry.thoughtsTokenCount)}`);
+  console.log(
+    `Prompt Tokens: ${formatNumber(telemetry.promptTokenCount)}`
+  );
+  console.log(
+    `Output Tokens: ${formatNumber(telemetry.candidatesTokenCount)}`
+  );
+  console.log(
+    `Total Tokens: ${formatNumber(telemetry.totalTokenCount)}`
+  );
+  console.log(
+    `Cached Tokens: ${formatNumber(telemetry.cachedContentTokenCount)}`
+  );
+  console.log(
+    `Thought Tokens: ${formatNumber(telemetry.thoughtsTokenCount)}`
+  );
   console.log(`Finish Reason: ${telemetry.finishReason || "unknown"}`);
   console.log(`Cache Key: ${data.cacheKey || doc.id}`);
   console.log("========================================");
 }
 
+/**
+ * Reads the newest scan-cache records without mutation.
+ */
 async function main() {
   const snapshot = await db
     .collection("scan_cache")
@@ -66,7 +96,9 @@ async function main() {
     return;
   }
 
-  console.log(`411 QA: showing ${snapshot.size} most recent scan(s).`);
+  console.log(
+    `411 QA: showing ${snapshot.size} most recent scan(s).`
+  );
 
   snapshot.forEach(printScan);
 }
