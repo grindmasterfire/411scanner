@@ -2,41 +2,75 @@
  * @file functions/actionMeterFloorRaisers.js
  * @class Class 1
  * @cap 150 Lines
- * @responsibility Extract qualitative Floor-Raiser triggers and apply their server-owned numerical effects.
+ * @responsibility Validate qualitative Floor-Raiser triggers and apply server-owned numerical effects.
  * @dependencies None.
- * @security_gate Gemini identifies qualitative triggers only. The server owns numerical Floor-Raiser application.
+ * @security_gate A Gemini trigger is accepted only when its matching evidence bucket contains concrete evidence.
  * @owner_context 411 Scanner server-owned Action Meter Floor-Raiser governance.
  */
 
 /**
- * Extracts the evidence-dependent Floor-Raiser flags from the
- * validated Gemini report.
+ * Returns true only when an evidence bucket contains at least
+ * one non-empty evidence statement.
+ */
+function hasEvidence(evidenceBucket) {
+  return (
+    Array.isArray(evidenceBucket) &&
+    evidenceBucket.some(
+      (item) =>
+        typeof item === "string" &&
+        item.trim().length > 0
+    )
+  );
+}
+
+/**
+ * Extracts and validates evidence-dependent Floor-Raiser flags.
  *
- * Only explicit boolean true values activate a trigger.
- * Missing, false, or non-boolean values do not activate one.
+ * Gemini may propose boolean triggers, but the server accepts a
+ * trigger only when its matching evidence receipt is populated.
  */
 function extractFloorRaisers(parsedData) {
+  const card =
+    parsedData?.consumer_card || {};
+
   const source =
-    parsedData?.consumer_card?.floor_raisers || {};
+    card.floor_raisers || {};
+
+  const evidence =
+    card.floor_raiser_evidence || {};
 
   return {
     rebrandPattern:
-      source.rebrand_pattern === true,
+      source.rebrand_pattern === true &&
+      hasEvidence(evidence.rebrand_pattern),
 
     advanceFee:
-      source.advance_fee === true,
+      source.advance_fee === true &&
+      hasEvidence(evidence.advance_fee),
 
     federalImpersonation:
-      source.federal_impersonation === true,
+      source.federal_impersonation === true &&
+      hasEvidence(evidence.federal_impersonation),
 
     confirmedCriminal:
-      source.confirmed_criminal === true,
+      source.confirmed_criminal === true &&
+      hasEvidence(evidence.confirmed_criminal),
 
     nearThresholdSuspension:
-      source.near_threshold_suspension === true,
+      source.near_threshold_suspension === true &&
+      hasEvidence(evidence.near_threshold_suspension),
 
     withdrawalGate:
-      source.withdrawal_gate === true,
+      source.withdrawal_gate === true &&
+      hasEvidence(evidence.withdrawal_gate),
+
+    ipHostageLockIn:
+      source.ip_hostage_lock_in === true &&
+      hasEvidence(evidence.ip_hostage_lock_in),
+
+    adArbitrageMfaLure:
+      source.ad_arbitrage_mfa_lure === true &&
+      hasEvidence(evidence.ad_arbitrage_mfa_lure),
   };
 }
 
@@ -76,6 +110,14 @@ function applyFloorRaisers(
   }
 
   if (floorRaisers.withdrawalGate) {
+    score += 0.5;
+  }
+
+  if (floorRaisers.ipHostageLockIn) {
+    score += 0.5;
+  }
+
+  if (floorRaisers.adArbitrageMfaLure) {
     score += 0.5;
   }
 

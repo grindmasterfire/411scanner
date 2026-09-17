@@ -12,6 +12,10 @@
   },
   "private": true,
   "scripts": {
-    "qa:last": "node scripts/qa-last.js"
+    "qa:last": "node scripts/qa-last.js",
+    "business:last": "node scripts/business-center.js last",
+    "business:today": "node scripts/business-center.js today",
+    "business:week": "node scripts/business-center.js week",
+    "business:month": "node scripts/business-center.js month"
   }
 }

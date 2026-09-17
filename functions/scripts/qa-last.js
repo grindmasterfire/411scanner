@@ -30,7 +30,8 @@ function formatNumber(value) {
  * Practical Utility is the current diagnostic meaning of the
  * V1 compatibility field offline_independence.
  *
- * Honest Pricing remains unchanged in this task.
+ * Honest Business Model is the current diagnostic meaning of the
+ * V1 compatibility field honest_pricing.
  */
 function printScan(doc) {
   const data = doc.data() || {};
@@ -57,7 +58,9 @@ function printScan(doc) {
   console.log(
     `Practical Utility: ${metrics.offline_independence ?? "?"}`
   );
-  console.log(`Honest Pricing: ${metrics.honest_pricing ?? "?"}`);
+  console.log(
+    `Honest Business Model: ${metrics.honest_pricing ?? "?"}`
+  );
   console.log("----------------------------------------");
   console.log(`Model: ${telemetry.model || "unknown"}`);
   console.log(`Operation: ${telemetry.operation || "unknown"}`);

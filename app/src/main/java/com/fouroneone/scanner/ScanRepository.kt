@@ -2,10 +2,21 @@
  * @file: ScanRepository.kt
  * @class: Class 2 (Standard UI/Data Component)
  * @cap: 250 Lines
- * @responsibility: Execute production scan and Deep Dive HTTP requests and preserve the Cache Bank identity returned by Firebase.
- * @dependencies: Android Log, Kotlin coroutines, OkHttp, org.json
- * @security_gate: Transport-only repository. No credentials are stored locally and no scoring or report mutation occurs here.
- * @owner_context: 411 Scanner Android transport between result screens and Firebase callable HTTP endpoints.
+ * @responsibility:
+ * Execute production scan and Deep Dive HTTP requests, transport optional
+ * on-device OCR clues, and preserve the Cache Bank identity returned by Firebase.
+ *
+ * @dependencies:
+ * Android Log, Kotlin coroutines, OkHttp, org.json.
+ *
+ * @security_gate:
+ * Transport-only repository. OCR text is forwarded as a non-authoritative
+ * Cache Bank clue. This client does not establish solicitation identity,
+ * calculate scores, alter evidence, or mutate grounded reports.
+ *
+ * @owner_context:
+ * 411 Scanner Android transport between scanner/result screens and Firebase
+ * callable HTTP endpoints.
  */
 
 package com.fouroneone.scanner
@@ -38,51 +49,70 @@ object ScanRepository {
             .build()
     }
 
-    suspend fun scan(base64Image: String): String =
-        withContext(Dispatchers.IO) {
-            val payload = JSONObject().apply {
-                put("data", JSONObject().apply {
-                    put("imageBase64", base64Image)
-                    put("mimeType", "image/jpeg")
-                })
-            }
+    /**
+     * Sends the prepared JPEG plus optional OCR text to the production
+     * scan endpoint.
+     *
+     * OCR may be empty. The server treats it only as a cheap candidate
+     * discovery clue and safely falls back to normal grounded analysis
+     * whenever the clue is absent or insufficient.
+     */
+    suspend fun scan(
+        base64Image: String,
+        ocrText: String = ""
+    ): String = withContext(Dispatchers.IO) {
+        val payload = JSONObject().apply {
+            put("data", JSONObject().apply {
+                put("imageBase64", base64Image)
+                put("mimeType", "image/jpeg")
 
-            val requestBody = payload.toString()
-                .toRequestBody(
-                    "application/json; charset=utf-8".toMediaType()
-                )
-
-            val request = Request.Builder()
-                .url(FUNCTION_URL)
-                .post(requestBody)
-                .build()
-
-            val response =
-                httpClient.newCall(request).execute()
-
-            val responseBodyString =
-                response.body?.string()
-                    ?: throw IllegalStateException(
-                        "Empty response from scan engine"
-                    )
-
-            if (!response.isSuccessful) {
-                Log.e(
-                    TAG,
-                    "Scan HTTP error (${response.code}): $responseBodyString"
-                )
-
-                throw IllegalStateException(
-                    "Scan failed (${response.code}): $responseBodyString"
-                )
-            }
-
-            responseBodyString
+                /*
+                 * Keep the raw OCR clue separate from image identity.
+                 * Cache Bank exact-image keys are based only on image bytes,
+                 * and the server owns all reuse/identity decisions.
+                 */
+                put("ocrText", ocrText)
+            })
         }
+
+        val requestBody = payload.toString()
+            .toRequestBody(
+                "application/json; charset=utf-8".toMediaType()
+            )
+
+        val request = Request.Builder()
+            .url(FUNCTION_URL)
+            .post(requestBody)
+            .build()
+
+        val response =
+            httpClient.newCall(request).execute()
+
+        val responseBodyString =
+            response.body?.string()
+                ?: throw IllegalStateException(
+                    "Empty response from scan engine"
+                )
+
+        if (!response.isSuccessful) {
+            Log.e(
+                TAG,
+                "Scan HTTP error (${response.code}): $responseBodyString"
+            )
+
+            throw IllegalStateException(
+                "Scan failed (${response.code}): $responseBodyString"
+            )
+        }
+
+        responseBodyString
+    }
 
     /**
      * Fetches the Deep Dive on demand and associates it with the
      * Cache Bank record belonging to the originating scan.
+     *
+     * Deep Dive transport remains untouched by T03 Cache Bank OCR work.
      */
     suspend fun deepDive(
         report: ScanReport

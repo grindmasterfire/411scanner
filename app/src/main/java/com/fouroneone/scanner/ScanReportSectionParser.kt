@@ -1,11 +1,10 @@
 /**
  * @file: ScanReportSectionParser.kt
- * @class: Class 2 (Standard Logic Component)
+ * @class: Class 2
  * @cap: 250 Lines
- * @responsibility: Parse individual 411 Scanner report sections into Android data contracts.
- * @dependencies: org.json.JSONArray, org.json.JSONObject, ScanReport data contracts, ScanTelemetry
- * @security_gate: Read-only parsing. No network access, scoring mutation, persistence, or identity inference.
- * @owner_context: 411 Scanner Android production-response section parser.
+ * @responsibility: Parse 411 report sections while preserving legacy Cache Bank compatibility.
+ * @dependencies: org.json.JSONArray, org.json.JSONObject
+ * @security_gate: Read-only parsing. No network, scoring, persistence, or identity mutation.
  */
 
 package com.fouroneone.scanner
@@ -15,14 +14,9 @@ import org.json.JSONObject
 
 object ScanReportSectionParser {
 
-    /**
-     * Parses the Consumer Card and six diagnostic vectors.
-     *
-     * offline_independence remains the V1 wire key for Practical Utility.
-     */
     fun parseConsumerCard(report: JSONObject): ConsumerCard {
         val card = report.optJSONObject("consumer_card") ?: JSONObject()
-        val source = card.optJSONObject("metrics") ?: JSONObject()
+        val metrics = card.optJSONObject("metrics") ?: JSONObject()
         val notes = card.optJSONObject("metric_annotations") ?: JSONObject()
 
         return ConsumerCard(
@@ -31,29 +25,45 @@ object ScanReportSectionParser {
             interfaceSurface = card.optString("interface_surface", ""),
             classificationBadges = jsonArrayToList(card.optJSONArray("classification_badges")),
             metrics = Metrics(
-                financialRisk = source.optInt("financial_risk", 0),
-                personalDataExposure = source.optInt("personal_data_exposure", 0),
-                wastedTimeAndAds = source.optInt("wasted_time_and_ads", 0),
-                realSubstance = source.optInt("real_substance", 0),
-                practicalUtility = source.optInt("offline_independence", 0),
-                honestPricing = source.optInt("honest_pricing", 0)
+                financialRisk = metrics.optInt("financial_risk", 0),
+                personalDataExposure = metrics.optInt("personal_data_exposure", 0),
+                wastedTimeAndAds = metrics.optInt("wasted_time_and_ads", 0),
+                realSubstance = metrics.optInt("real_substance", 0),
+                practicalUtility = canonicalOrLegacyInt(
+                    metrics,
+                    "practical_utility",
+                    "offline_independence"
+                ),
+                honestBusinessModel = canonicalOrLegacyInt(
+                    metrics,
+                    "honest_business_model",
+                    "honest_pricing"
+                )
             ),
             metricAnnotations = MetricAnnotations(
                 financialRiskNote = notes.optString("financial_risk_note", ""),
                 personalDataNote = notes.optString("personal_data_note", ""),
                 wastedTimeNote = notes.optString("wasted_time_note", ""),
                 realSubstanceNote = notes.optString("real_substance_note", ""),
-                practicalUtilityNote = notes.optString("offline_independence_note", ""),
-                honestPricingNote = notes.optString("honest_pricing_note", "")
+                practicalUtilityNote = canonicalOrLegacyString(
+                    notes,
+                    "practical_utility_note",
+                    "offline_independence_note"
+                ),
+                honestBusinessModelNote = canonicalOrLegacyString(
+                    notes,
+                    "honest_business_model_note",
+                    "honest_pricing_note"
+                )
             ),
             actionMeterScore = card.optDouble("action_meter_score", 5.0),
             actionVerdictBadge = card.optString(
                 "action_verdict_badge",
-                "MOSTLY_FOR_EVERYONE"
+                "MOSTLY_EVERYBODY"
             ),
             verdictLabel = card.optString(
                 "verdict_label",
-                "MOSTLY FOR EVERYONE"
+                "MOSTLY EVERYBODY"
             ),
             tagline = card.optString("tagline", ""),
             essential411 = card.optString("essential_411", ""),
@@ -61,7 +71,6 @@ object ScanReportSectionParser {
         )
     }
 
-    /** Parses the resolved solicitation identity. */
     fun parseSolicitationIdentity(report: JSONObject): SolicitationIdentity {
         val source = report.optJSONObject("solicitation_identity") ?: JSONObject()
 
@@ -75,7 +84,6 @@ object ScanReportSectionParser {
         )
     }
 
-    /** Parses evidence-supported solicitation-pattern classification. */
     fun parseSolicitationPattern(report: JSONObject): SolicitationPattern {
         val source = report.optJSONObject("solicitation_pattern") ?: JSONObject()
 
@@ -84,9 +92,7 @@ object ScanReportSectionParser {
             offerOrRequest = source.optString("offer_or_request", ""),
             requestedAction = source.optString("requested_action", ""),
             mechanics = jsonArrayToList(source.optJSONArray("mechanics")),
-            behavioralSignals = jsonArrayToList(
-                source.optJSONArray("behavioral_signals")
-            ),
+            behavioralSignals = jsonArrayToList(source.optJSONArray("behavioral_signals")),
             footprintStatus = source.optString("footprint_status", "unknown"),
             patternAssessment = source.optString(
                 "pattern_assessment",
@@ -97,7 +103,6 @@ object ScanReportSectionParser {
         )
     }
 
-    /** Parses network, monetization, and regulatory evidence. */
     fun parseTechnicalLedger(report: JSONObject): TechnicalLedger {
         val ledger = report.optJSONObject("technical_ledger") ?: JSONObject()
         val network = ledger.optJSONObject("network_telemetry") ?: JSONObject()
@@ -127,25 +132,29 @@ object ScanReportSectionParser {
                 complaintPattern = regulatory.optString("complaint_pattern", ""),
                 reviewSpread = regulatory.optString("review_spread", "")
             ),
+            evidenceReceipts = parseEvidenceReceipts(
+                ledger.optJSONArray("evidence_receipts")
+            ),
             complaintPattern = ledger.optString("complaint_pattern", ""),
             reviewSpread = ledger.optString("review_spread", "")
         )
     }
 
-    /** Parses verified links and recommended alternatives. */
     fun parseAlternatives(report: JSONObject): Alternatives {
         val source = report.optJSONObject("alternatives") ?: JSONObject()
         val links = source.optJSONObject("verified_links") ?: JSONObject()
-        val recommendations = mutableListOf<Alternative>()
-        val array = source.optJSONArray("recommended_alternatives")
+        val discoveries = mutableListOf<Alternative>()
+        val array = source.optJSONArray("discovery_items")
 
         if (array != null) {
             for (index in 0 until array.length()) {
                 val item = array.optJSONObject(index) ?: continue
-                recommendations.add(
+
+                discoveries.add(
                     Alternative(
                         name = item.optString("name", ""),
-                        scoreEstimate = item.optString("score_estimate", ""),
+                        destinationUrl = item.optString("destination_url", ""),
+                        relationship = item.optString("relationship", "other"),
                         description = item.optString("description", "")
                     )
                 )
@@ -153,18 +162,15 @@ object ScanReportSectionParser {
         }
 
         return Alternatives(
-            renders = source.optBoolean("renders", false),
             verifiedLinks = VerifiedLinks(
                 officialSite = links.optString("official_site", ""),
                 realPhone = links.optString("real_phone", ""),
                 realEmail = links.optString("real_email", "")
             ),
-            recommendedAlternatives = recommendations,
-            communityTags = jsonArrayToList(source.optJSONArray("community_tags"))
+            discoveryItems = discoveries
         )
     }
 
-    /** Parses optional Gemini execution telemetry. */
     fun parseTelemetry(root: JSONObject): ScanTelemetry? {
         val source = root.optJSONObject("telemetry") ?: return null
 
@@ -180,23 +186,74 @@ object ScanReportSectionParser {
         )
     }
 
-    /** Preserves nullability for optional integer evidence fields. */
+    private fun parseEvidenceReceipts(
+        array: JSONArray?
+    ): List<TechnicalEvidenceReceipt> {
+        if (array == null) return emptyList()
+
+        val values = mutableListOf<TechnicalEvidenceReceipt>()
+
+        for (index in 0 until array.length()) {
+            val item = array.optJSONObject(index) ?: continue
+
+            values.add(
+                TechnicalEvidenceReceipt(
+                    field = item.optString("field", ""),
+                    status = item.optString("status", "not_researched"),
+                    finding = item.optString("finding", ""),
+                    authority = item.optString("authority", ""),
+                    subject = item.optString("subject", ""),
+                    identifier = item.optString("identifier", ""),
+                    sourceUrl = item.optString("source_url", ""),
+                    sourceTitle = item.optString("source_title", "")
+                )
+            )
+        }
+
+        return values
+    }
+
+    private fun canonicalOrLegacyInt(
+        source: JSONObject,
+        canonical: String,
+        legacy: String
+    ): Int =
+        if (source.has(canonical)) {
+            source.optInt(canonical, 0)
+        } else {
+            source.optInt(legacy, 0)
+        }
+
+    private fun canonicalOrLegacyString(
+        source: JSONObject,
+        canonical: String,
+        legacy: String
+    ): String =
+        if (source.has(canonical)) {
+            source.optString(canonical, "")
+        } else {
+            source.optString(legacy, "")
+        }
+
     private fun nullableInt(source: JSONObject, key: String): Int? =
         if (source.isNull(key)) null else source.optInt(key)
 
-    /** Preserves nullability for optional string evidence fields. */
     private fun nullableString(source: JSONObject, key: String): String? =
         if (source.isNull(key)) null else source.optString(key)
 
-    /** Converts an optional JSON string array into a clean Kotlin list. */
     private fun jsonArrayToList(array: JSONArray?): List<String> {
         if (array == null) return emptyList()
 
         val values = mutableListOf<String>()
+
         for (index in 0 until array.length()) {
             val value = array.optString(index)
-            if (value.isNotBlank()) values.add(value)
+
+            if (value.isNotBlank()) {
+                values.add(value)
+            }
         }
+
         return values
     }
 }

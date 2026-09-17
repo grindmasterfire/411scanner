@@ -1,35 +1,9 @@
 /**
  * @file: TechnicalLedgerTab.kt
- * @class: Class 2 (Standard UI/Data Component)
- * @cap: 250 Lines
- *
- * @responsibility:
- * Render the technical evidence ledger for a completed 411 Scanner report.
- * Present network telemetry, monetization evidence, regulatory records,
- * complaint patterns, review spread, and source-inspection actions.
- *
- * @dependencies:
- * Android Intent
- * Android Uri
- * Jetpack Compose
- * Material 3
- * ConsumerCard
- * TechnicalLedger
- * ForensicUrlResolver
- *
- * @security_gate:
- * Read-only presentation layer.
- * Does not perform scoring, identity attribution, network requests,
- * persistence, solicitation-pattern generation, or evidence mutation.
- *
- * @owner_context:
- * 411 Scanner forensic technical ledger presentation.
- *
- * @t03_boundary:
- * Solicitation pattern identity is carried by ScanReport.solicitationPattern.
- * This tab does not reinterpret pattern evidence as actor identity.
- * Legacy technicalFlags are intentionally not referenced because they are
- * not part of the current TechnicalLedger contract.
+ * @class: Class 3
+ * @cap: 400 Lines
+ * @responsibility: Render Technical 411 evidence, structured receipts, and source-inspection actions.
+ * @security_gate: Read-only presentation. No scoring, evidence mutation, persistence, or network research.
  */
 
 package com.fouroneone.scanner
@@ -70,13 +44,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/**
- * Technical evidence ledger for the completed diagnostic report.
- *
- * The tab intentionally consumes the existing TechnicalLedger contract.
- * T03 solicitation-pattern evidence remains a separate report-level object
- * and is not converted into generic technical flags here.
- */
 @Composable
 fun TechnicalLedgerTab(
     consumerCard: ConsumerCard?,
@@ -84,7 +51,6 @@ fun TechnicalLedgerTab(
 ) {
     val context = LocalContext.current
 
-    // Fail safely when the report contains no technical ledger.
     if (technicalLedger == null) {
         Box(
             modifier = Modifier.fillMaxSize(),
@@ -98,27 +64,20 @@ fun TechnicalLedgerTab(
         return
     }
 
-    // Pull the established ledger sections into local references for readability.
     val nt = technicalLedger.networkTelemetry
     val mon = technicalLedger.monetization
     val reg = technicalLedger.regulatoryRecord
-
-    // Classification badges remain sourced from the consumer-facing report object.
+    val receipts = technicalLedger.evidenceReceipts
     val badges = consumerCard?.classificationBadges ?: emptyList()
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(
-                horizontal = 16.dp,
-                vertical = 12.dp
-            )
+            .padding(horizontal = 16.dp, vertical = 12.dp)
             .navigationBarsPadding(),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-
-        // Display existing classification information when available.
         if (badges.isNotEmpty()) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -157,155 +116,136 @@ fun TechnicalLedgerTab(
             }
         }
 
-        // Network and infrastructure evidence.
-        LedgerCard(title = "NETWORK & TELEMETRY") {
+        LedgerCard("NETWORK & TELEMETRY") {
             LedgerItem(
                 "Package / Domain",
-                nt.appPackageOrDomain.ifBlank {
-                    "Not Identified"
-                }
+                nt.appPackageOrDomain.ifBlank { "Not established" }
             )
 
             LedgerItem(
                 "Host / CDN",
-                nt.hostCdn.ifBlank {
-                    "Unknown"
-                }
+                nt.hostCdn.ifBlank { "Not established" }
             )
 
             LedgerItem(
                 "Domain Age",
-                nt.domainAgeDays?.let {
-                    "$it days"
-                } ?: "Unknown"
+                nt.domainAgeDays?.let { "$it days" }
+                    ?: "Not established"
             )
 
             LedgerItem(
                 "TLS Status",
-                nt.tlsCertificateStatus ?: "Unknown"
+                nt.tlsCertificateStatus
+                    ?.takeIf { it.isNotBlank() }
+                    ?: "Not established"
             )
 
-            // Only show grounding sources when the backend supplied them.
             if (nt.groundingSources.isNotEmpty()) {
                 LedgerItem(
-                    "Grounding Sources",
-                    nt.groundingSources.joinToString("\n")
+                    "Grounded Sources",
+                    "${nt.groundingSources.size} provider-confirmed source(s)"
                 )
             }
         }
 
-        // Commercial and monetization evidence.
-        LedgerCard(title = "MONETIZATION") {
+        LedgerCard("MONETIZATION") {
             LedgerItem(
                 "Revenue Model",
-                mon.revenueModel.ifBlank {
-                    "Unknown"
-                }
+                mon.revenueModel.ifBlank { "Not established" }
             )
 
             LedgerItem(
                 "Pricing",
-                mon.pricing.ifBlank {
-                    "Not disclosed"
-                }
+                mon.pricing.ifBlank { "Not established" }
             )
 
             LedgerItem(
                 "Affiliate Disclosure",
-                mon.affiliateDisclosure.ifBlank {
-                    "None"
-                }
+                mon.affiliateDisclosure.ifBlank { "Not established" }
             )
 
             LedgerItem(
                 "Guarantee / Refund",
-                mon.guaranteeTerms.ifBlank {
-                    "None stated"
-                }
+                mon.guaranteeTerms.ifBlank { "Not established" }
             )
         }
 
-        // Regulatory and complaint evidence.
-        LedgerCard(title = "REGULATORY & COMPLAINT RECORD") {
+        LedgerCard("REGULATORY & COMPLAINT RECORD") {
             LedgerItem(
                 "License Status",
-                reg.licenseStatus.ifBlank {
-                    "Not verified"
-                }
+                reg.licenseStatus.ifBlank { "Not established" }
             )
 
             LedgerItem(
                 "BBB Record",
-                reg.bbbRecord.ifBlank {
-                    "No record found"
-                }
+                reg.bbbRecord.ifBlank { "Not established" }
             )
 
             LedgerItem(
                 "FTC Record",
-                reg.ftcRecord.ifBlank {
-                    "No record found"
-                }
+                reg.ftcRecord.ifBlank { "Not established" }
             )
 
             LedgerItem(
                 "Complaint Pattern",
-                reg.complaintPattern.ifBlank {
-                    "None documented"
-                }
+                reg.complaintPattern.ifBlank { "Not established" }
             )
 
             LedgerItem(
                 "Review Spread",
-                reg.reviewSpread.ifBlank {
-                    "No data"
-                }
+                reg.reviewSpread.ifBlank { "Not established" }
             )
         }
 
-        /*
-         * T03 boundary:
-         *
-         * Do not render a legacy "TECHNICAL FLAGS" section.
-         *
-         * TechnicalLedger no longer exposes technicalFlags.
-         * Solicitation-pattern evidence has its own strongly typed
-         * ScanReport.solicitationPattern contract and must not be
-         * collapsed into an unrelated technical-flags collection.
-         */
+        if (receipts.isNotEmpty()) {
+            LedgerCard("EVIDENCE RECEIPTS") {
+                receipts.forEach { receipt ->
+                    val label =
+                        receipt.field
+                            .replace("_", " ")
+                            .uppercase()
 
-        // Resolve the source URL using the existing forensic resolver.
+                    val finding =
+                        receipt.finding.ifBlank {
+                            when (receipt.status) {
+                                "not_found" -> "Relevant research found no matching record."
+                                "not_applicable" -> "Not applicable."
+                                "unresolved" -> "Research could not resolve this field."
+                                "not_researched" -> "Not researched in this investigation."
+                                else -> "No finding supplied."
+                            }
+                        }
+
+                    LedgerItem(
+                        "$label · ${receipt.status.uppercase()}",
+                        finding
+                    )
+                }
+            }
+        }
+
         val forensicUrl =
             ForensicUrlResolver.resolve(
                 consumerCard,
                 technicalLedger
             )
 
-        // Preserve the existing severity threshold used by the report UI.
         val score =
             consumerCard?.actionMeterScore ?: 0.0
 
-        val isSevereThreat =
-            score >= 8.0
-
-        /*
-         * A report button is shown only when the existing FTC record
-         * indicates an actual record rather than the default "No record"
-         * placeholder.
-         */
-        val hasViolation =
-            reg.ftcRecord.isNotBlank() &&
-                !reg.ftcRecord.contains(
-                    "No record",
-                    ignoreCase = true
-                )
+        val hasVerifiedFtcRecord =
+            receipts.any {
+                it.status.equals("verified", ignoreCase = true) &&
+                    (
+                        it.field.contains("ftc", ignoreCase = true) ||
+                        it.authority.contains("FTC", ignoreCase = true)
+                    )
+            }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-
-            // Open the resolved forensic source for direct inspection.
             Button(
                 onClick = {
                     context.startActivity(
@@ -330,9 +270,7 @@ fun TechnicalLedgerTab(
                 )
 
                 Spacer(
-                    modifier = Modifier.padding(
-                        horizontal = 3.dp
-                    )
+                    modifier = Modifier.padding(horizontal = 3.dp)
                 )
 
                 Text(
@@ -342,20 +280,16 @@ fun TechnicalLedgerTab(
                 )
             }
 
-            /*
-             * Preserve the existing reporting gate:
-             * both a severe action-meter score and an identified FTC
-             * record are required before presenting the report action.
-             */
-            if (isSevereThreat && hasViolation) {
+            if (
+                score >= 8.0 &&
+                hasVerifiedFtcRecord
+            ) {
                 OutlinedButton(
                     onClick = {
                         context.startActivity(
                             Intent(
                                 Intent.ACTION_VIEW,
-                                Uri.parse(
-                                    "https://reportfraud.ftc.gov/"
-                                )
+                                Uri.parse("https://reportfraud.ftc.gov/")
                             )
                         )
                     },
@@ -375,9 +309,7 @@ fun TechnicalLedgerTab(
                     )
 
                     Spacer(
-                        modifier = Modifier.padding(
-                            horizontal = 2.dp
-                        )
+                        modifier = Modifier.padding(horizontal = 2.dp)
                     )
 
                     Text(
@@ -396,12 +328,6 @@ fun TechnicalLedgerTab(
     }
 }
 
-/**
- * Standard container used for individual technical-ledger sections.
- *
- * The content lambda is composable so callers can place LedgerItem
- * components directly inside the card.
- */
 @Composable
 private fun LedgerCard(
     title: String,
@@ -438,12 +364,6 @@ private fun LedgerCard(
     }
 }
 
-/**
- * Standard label/value renderer for technical evidence.
- *
- * Values are already grounded by the report parser. This component
- * performs presentation only and does not alter evidence semantics.
- */
 @Composable
 private fun LedgerItem(
     label: String,

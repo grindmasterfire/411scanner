@@ -1,64 +1,30 @@
 /**
- * @file: functions/solicitationIdentity.js
- * @class: Class 1 (Hooks, Helpers, & Constants)
- * @responsibility: Persist and retrieve grounded historical solicitation identities.
- * @dependencies: firebase-admin
- * @security_gate: Never creates identity claims. Only stores identity data supplied by the grounded scan.
- * @owner_context: 411 Scanner historical solicitation continuity.
+ * @file functions/solicitationIdentity.js
+ * @class Class 1
+ * @cap 150 Lines
+ * @responsibility Preserve the solicitation identity API while delegating key policy and history persistence.
+ * @dependencies ./solicitationIdentityKey, ./solicitationHistoryStore
+ * @security_gate Only confirmed grounded identity data may produce a permanent identity key.
+ * @owner_context 411 Scanner historical solicitation continuity boundary.
  */
 
-function normalizeIdentityValue(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ");
-}
+const {
+  buildSolicitationIdentityKey,
+} = require("./solicitationIdentityKey");
 
-function buildSolicitationIdentityKey(identity) {
-  if (!identity || identity.confidence !== "confirmed") {
-    return null;
-  }
+const {
+  getSolicitationHistory: readSolicitationHistory,
+  saveSolicitationHistory: persistSolicitationHistory,
+} = require("./solicitationHistoryStore");
 
-  const anchors = [
-    identity.canonicalName,
-    identity.operator,
-    identity.destinationDomain,
-    identity.destinationPath,
-    identity.offerMechanic
-  ]
-    .map(normalizeIdentityValue)
-    .filter(Boolean);
-
-  if (anchors.length < 2) {
-    return null;
-  }
-
-  return anchors.join("::");
-}
-
-async function getSolicitationHistory(db, solicitationIdentity) {
-  if (!solicitationIdentity) {
-    return null;
-  }
-
-  try {
-    const doc = await db
-      .collection("solicitation_history")
-      .doc(solicitationIdentity)
-      .get();
-
-    if (!doc.exists) {
-      return null;
-    }
-
-    return doc.data() || null;
-  } catch (error) {
-    console.warn(
-      "411 Scanner solicitation history read failed:",
-      error
-    );
-    return null;
-  }
+async function getSolicitationHistory(
+  db,
+  solicitationIdentity
+) {
+  return readSolicitationHistory(
+    db,
+    solicitationIdentity
+  );
 }
 
 async function saveSolicitationHistory(
@@ -66,36 +32,24 @@ async function saveSolicitationHistory(
   solicitationIdentity,
   identity,
   cacheKey,
-  serverTimestamp
+  serverTimestamp,
+  stateFingerprint = null
 ) {
-  if (!solicitationIdentity || !identity) {
-    return;
-  }
-
-  try {
-    const ref = db
-      .collection("solicitation_history")
-      .doc(solicitationIdentity);
-
-    await ref.set(
-      {
-        solicitationIdentity,
-        identity,
-        lastSeenCacheKey: cacheKey,
-        lastSeenAt: serverTimestamp
-      },
-      { merge: true }
-    );
-  } catch (error) {
-    console.warn(
-      "411 Scanner solicitation history write failed:",
-      error
-    );
-  }
+  // stateFingerprint is intentionally last so existing callers
+  // using the legacy five-argument contract remain valid while
+  // index.js is migrated to explicit state-version persistence.
+  return persistSolicitationHistory(
+    db,
+    solicitationIdentity,
+    identity,
+    cacheKey,
+    stateFingerprint,
+    serverTimestamp
+  );
 }
 
 module.exports = {
   buildSolicitationIdentityKey,
   getSolicitationHistory,
-  saveSolicitationHistory
+  saveSolicitationHistory,
 };

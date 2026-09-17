@@ -111,9 +111,9 @@ fun SixVectorGrid(
             )
             Spacer(modifier = Modifier.height(8.dp))
             VectorMetricCard(
-                "Honest Pricing",
-                metrics.honestPricing,
-                annotations.honestPricingNote,
+                "Honest Business Model",
+                metrics.honestBusinessModel,
+                annotations.honestBusinessModelNote,
                 false
             )
         }

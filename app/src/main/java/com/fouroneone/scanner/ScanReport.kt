@@ -1,10 +1,9 @@
 /**
  * @file: ScanReport.kt
- * @class: Class 2 (Standard UI/Data Component)
+ * @class: Class 2
  * @cap: 250 Lines
  * @responsibility: Define the production scan report contract consumed by Android result screens.
- * @dependencies: ScanTelemetry, ScanReportParser
- * @security_gate: Data contract only. No network access, scoring mutation, or persistence.
+ * @security_gate: Data contract only. No network access, scoring mutation, persistence, or identity inference.
  * @owner_context: 411 Scanner report contract between Firebase scan responses and Android result screens.
  */
 
@@ -16,7 +15,7 @@ data class Metrics(
     val wastedTimeAndAds: Int = 0,
     val realSubstance: Int = 0,
     val practicalUtility: Int = 0,
-    val honestPricing: Int = 0
+    val honestBusinessModel: Int = 0
 )
 
 data class MetricAnnotations(
@@ -25,7 +24,7 @@ data class MetricAnnotations(
     val wastedTimeNote: String = "",
     val realSubstanceNote: String = "",
     val practicalUtilityNote: String = "",
-    val honestPricingNote: String = ""
+    val honestBusinessModelNote: String = ""
 )
 
 data class ConsumerCard(
@@ -36,8 +35,8 @@ data class ConsumerCard(
     val metrics: Metrics = Metrics(),
     val metricAnnotations: MetricAnnotations = MetricAnnotations(),
     val actionMeterScore: Double = 5.0,
-    val actionVerdictBadge: String = "MOSTLY_FOR_EVERYONE",
-    val verdictLabel: String = "MOSTLY FOR EVERYONE",
+    val actionVerdictBadge: String = "MOSTLY_EVERYBODY",
+    val verdictLabel: String = "MOSTLY EVERYBODY",
     val tagline: String = "",
     val essential411: String = "",
     val secondaryTargetsNote: String = ""
@@ -87,17 +86,36 @@ data class RegulatoryRecord(
     val reviewSpread: String = ""
 )
 
+/**
+ * Machine-readable Technical 411 claim receipt.
+ *
+ * The backend accepts "verified" only when the proposed source survives
+ * provider-grounding validation.
+ */
+data class TechnicalEvidenceReceipt(
+    val field: String = "",
+    val status: String = "not_researched",
+    val finding: String = "",
+    val authority: String = "",
+    val subject: String = "",
+    val identifier: String = "",
+    val sourceUrl: String = "",
+    val sourceTitle: String = ""
+)
+
 data class TechnicalLedger(
     val networkTelemetry: NetworkTelemetry = NetworkTelemetry(),
     val monetization: Monetization = Monetization(),
     val regulatoryRecord: RegulatoryRecord = RegulatoryRecord(),
+    val evidenceReceipts: List<TechnicalEvidenceReceipt> = emptyList(),
     val complaintPattern: String = "",
     val reviewSpread: String = ""
 )
 
 data class Alternative(
     val name: String = "",
-    val scoreEstimate: String = "",
+    val destinationUrl: String = "",
+    val relationship: String = "other",
     val description: String = ""
 )
 
@@ -108,21 +126,10 @@ data class VerifiedLinks(
 )
 
 data class Alternatives(
-    val renders: Boolean = false,
     val verifiedLinks: VerifiedLinks = VerifiedLinks(),
-    val recommendedAlternatives: List<Alternative> = emptyList(),
-    val communityTags: List<String> = emptyList()
+    val discoveryItems: List<Alternative> = emptyList()
 )
 
-/**
- * Complete parsed diagnostic report.
- *
- * Parsing is delegated to ScanReportParser so this file remains
- * atomic and below the Class 2 line cap.
- *
- * The parser preserves legacy V1 JSON compatibility keys such as
- * offline_independence while exposing Practical Utility internally.
- */
 data class ScanReport(
     val consumerCard: ConsumerCard = ConsumerCard(),
     val solicitationIdentity: SolicitationIdentity = SolicitationIdentity(),

@@ -1,11 +1,66 @@
 /**
  * @file functions/technicalLedgerSchema.js
- * @class Class 1
- * @cap 150 Lines
- * @responsibility Define the technical-ledger response schema.
+ * @class Class 2
+ * @cap 250 Lines
+ * @responsibility Define Technical 411 display fields and structured evidence-receipt response contracts.
  * @dependencies None.
- * @security_gate Schema only.
+ * @security_gate Model-proposed evidence is not trusted by schema alone; technicalLedgerEvidence.js validates receipts against provider-grounded sources.
+ * @owner_context 411 Scanner Technical 411 response contract.
+ *
+ * Evidence receipt status vocabulary:
+ * - verified
+ * - not_found
+ * - not_applicable
+ * - unresolved
+ * - not_researched
+ *
+ * Legacy Technical 411 text fields remain present for current Android
+ * rendering while evidence receipts become the machine-readable authority.
  */
+
+const EVIDENCE_RECEIPT_SCHEMA = {
+  type: "object",
+
+  properties: {
+    field: {
+      type: "string"
+    },
+
+    status: {
+      type: "string"
+    },
+
+    finding: {
+      type: "string"
+    },
+
+    authority: {
+      type: "string"
+    },
+
+    subject: {
+      type: "string"
+    },
+
+    identifier: {
+      type: "string"
+    },
+
+    source_url: {
+      type: "string"
+    }
+  },
+
+  required: [
+    "field",
+    "status",
+    "finding",
+    "authority",
+    "subject",
+    "identifier",
+    "source_url"
+  ]
+};
 
 const TECHNICAL_LEDGER_SCHEMA = {
   type: "object",
@@ -33,6 +88,10 @@ const TECHNICAL_LEDGER_SCHEMA = {
           nullable: true
         },
 
+        /*
+         * Gemini may propose these for schema completeness, but the server
+         * replaces them with provider-grounded destinations before trust.
+         */
         grounding_sources: {
           type: "array",
           items: {
@@ -111,6 +170,12 @@ const TECHNICAL_LEDGER_SCHEMA = {
       ]
     },
 
+    evidence_receipts: {
+      type: "array",
+      items:
+        EVIDENCE_RECEIPT_SCHEMA
+    },
+
     technical_flags: {
       type: "array",
       items: {
@@ -123,6 +188,7 @@ const TECHNICAL_LEDGER_SCHEMA = {
     "network_telemetry",
     "monetization",
     "regulatory_record",
+    "evidence_receipts",
     "technical_flags"
   ]
 };
