@@ -39,7 +39,7 @@ object ScanReportParser {
                         reportObj
                     ),
                 technicalLedger =
-                    ScanReportSectionParser.parseTechnicalLedger(
+                    TechnicalLedgerParser.parse(
                         reportObj
                     ),
                 alternatives =

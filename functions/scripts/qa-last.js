@@ -56,10 +56,10 @@ function printScan(doc) {
   );
   console.log(`Real Substance: ${metrics.real_substance ?? "?"}`);
   console.log(
-    `Practical Utility: ${metrics.offline_independence ?? "?"}`
+    `Practical Utility: ${metrics.practical_utility ?? metrics.offline_independence ?? "?"}`
   );
   console.log(
-    `Honest Business Model: ${metrics.honest_pricing ?? "?"}`
+    `Honest Business Model: ${metrics.honest_business_model ?? metrics.honest_pricing ?? "?"}`
   );
   console.log("----------------------------------------");
   console.log(`Model: ${telemetry.model || "unknown"}`);

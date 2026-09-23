@@ -19,6 +19,10 @@
  * subject, usable record identifier, and provider-grounded authority source.
  */
 
+const {
+  bindTechnicalEvidenceSources,
+} = require("./groundingEvidenceBinding");
+
 const VALID_STATUSES =
   new Set([
     "verified",
@@ -48,6 +52,89 @@ function normalizeUrl(value) {
   }
 }
 
+function comparableSourceKey(value) {
+  const normalized =
+    normalizeUrl(value);
+
+  if (!normalized) {
+    return "";
+  }
+
+  try {
+    const parsed =
+      new URL(normalized);
+
+    const host =
+      parsed.hostname
+        .toLowerCase()
+        .replace(/^www\./, "");
+
+    const port =
+      parsed.port
+        ? `:${parsed.port}`
+        : "";
+
+    const path =
+      parsed.pathname
+        .replace(/\/+$/, "") || "/";
+
+    const ignoredParams =
+      new Set([
+        "fbclid",
+        "gclid",
+        "igshid",
+        "mc_cid",
+        "mc_eid",
+      ]);
+
+    const params = [];
+
+    for (
+      const [key, itemValue]
+      of parsed.searchParams.entries()
+    ) {
+      if (
+        key.toLowerCase().startsWith("utm_") ||
+        ignoredParams.has(key.toLowerCase())
+      ) {
+        continue;
+      }
+
+      params.push(
+        `${key}=${itemValue}`
+      );
+    }
+
+    params.sort();
+
+    return (
+      `${host}${port}${path}` +
+      (
+        params.length
+          ? `?${params.join("&")}`
+          : ""
+      )
+    );
+  } catch {
+    return normalized
+      .toLowerCase()
+      .replace(/\/+$/, "");
+  }
+}
+
+function groundedUrlAliases(source) {
+  return [
+    source?.uri,
+    source?.url,
+    source?.resolvedUri,
+    source?.resolved_uri,
+    source?.sourceUrl,
+    source?.source_url,
+    source?.canonicalUrl,
+    source?.canonical_url,
+  ];
+}
+
 function buildGroundedSourceMap(
   groundedSources = []
 ) {
@@ -61,14 +148,73 @@ function buildGroundedSourceMap(
       continue;
     }
 
-    map.set(uri, {
+    const groundedSource = {
       uri,
       title:
         clean(source?.title),
-    });
+    };
+
+    for (
+      const alias
+      of groundedUrlAliases(source)
+    ) {
+      const normalized =
+        normalizeUrl(alias);
+
+      if (!normalized) {
+        continue;
+      }
+
+      map.set(
+        normalized,
+        groundedSource
+      );
+
+      const comparable =
+        comparableSourceKey(alias);
+
+      if (comparable) {
+        map.set(
+          `canonical:${comparable}`,
+          groundedSource
+        );
+      }
+    }
   }
 
   return map;
+}
+
+function findGroundedSource(
+  requestedUrl,
+  groundedSourceMap
+) {
+  const normalized =
+    normalizeUrl(requestedUrl);
+
+  if (!normalized) {
+    return null;
+  }
+
+  const exact =
+    groundedSourceMap.get(normalized);
+
+  if (exact) {
+    return exact;
+  }
+
+  const comparable =
+    comparableSourceKey(normalized);
+
+  if (!comparable) {
+    return null;
+  }
+
+  return (
+    groundedSourceMap.get(
+      `canonical:${comparable}`
+    ) || null
+  );
 }
 
 function isSecAuthority(receipt) {
@@ -138,9 +284,10 @@ function normalizeEvidenceReceipt(
     );
 
   const groundedSource =
-    groundedSourceMap.get(
-      sourceUrl
-    ) || null;
+    findGroundedSource(
+      sourceUrl,
+      groundedSourceMap
+    );
 
   const normalized = {
     field:
@@ -215,8 +362,30 @@ function normalizeEvidenceReceipt(
  */
 function normalizeTechnicalEvidence(
   report,
-  groundedSources = []
+  groundingInput = []
 ) {
+  const groundedSources =
+    Array.isArray(groundingInput)
+      ? groundingInput
+      : Array.isArray(
+          groundingInput?.sources
+        )
+        ? groundingInput.sources
+        : [];
+
+  const groundedSupports =
+    !Array.isArray(groundingInput) &&
+    Array.isArray(
+      groundingInput?.supports
+    )
+      ? groundingInput.supports
+      : [];
+
+  bindTechnicalEvidenceSources(
+    report,
+    groundedSources,
+    groundedSupports
+  );
   const ledger =
     report?.technical_ledger;
 

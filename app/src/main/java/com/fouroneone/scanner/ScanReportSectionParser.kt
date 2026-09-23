@@ -103,43 +103,6 @@ object ScanReportSectionParser {
         )
     }
 
-    fun parseTechnicalLedger(report: JSONObject): TechnicalLedger {
-        val ledger = report.optJSONObject("technical_ledger") ?: JSONObject()
-        val network = ledger.optJSONObject("network_telemetry") ?: JSONObject()
-        val money = ledger.optJSONObject("monetization") ?: JSONObject()
-        val regulatory = ledger.optJSONObject("regulatory_record") ?: JSONObject()
-
-        return TechnicalLedger(
-            networkTelemetry = NetworkTelemetry(
-                appPackageOrDomain = network.optString("app_package_or_domain", ""),
-                hostCdn = network.optString("host_cdn", ""),
-                domainAgeDays = nullableInt(network, "domain_age_days"),
-                tlsCertificateStatus = nullableString(network, "tls_certificate_status"),
-                groundingSources = jsonArrayToList(
-                    network.optJSONArray("grounding_sources")
-                )
-            ),
-            monetization = Monetization(
-                revenueModel = money.optString("revenue_model", ""),
-                pricing = money.optString("pricing", ""),
-                affiliateDisclosure = money.optString("affiliate_disclosure", ""),
-                guaranteeTerms = money.optString("guarantee_terms", "")
-            ),
-            regulatoryRecord = RegulatoryRecord(
-                licenseStatus = regulatory.optString("license_status", ""),
-                bbbRecord = regulatory.optString("bbb_record", ""),
-                ftcRecord = regulatory.optString("ftc_record", ""),
-                complaintPattern = regulatory.optString("complaint_pattern", ""),
-                reviewSpread = regulatory.optString("review_spread", "")
-            ),
-            evidenceReceipts = parseEvidenceReceipts(
-                ledger.optJSONArray("evidence_receipts")
-            ),
-            complaintPattern = ledger.optString("complaint_pattern", ""),
-            reviewSpread = ledger.optString("review_spread", "")
-        )
-    }
-
     fun parseAlternatives(report: JSONObject): Alternatives {
         val source = report.optJSONObject("alternatives") ?: JSONObject()
         val links = source.optJSONObject("verified_links") ?: JSONObject()
@@ -184,33 +147,6 @@ object ScanReportSectionParser {
             thoughtsTokenCount = source.optInt("thoughtsTokenCount", 0),
             finishReason = nullableString(source, "finishReason")
         )
-    }
-
-    private fun parseEvidenceReceipts(
-        array: JSONArray?
-    ): List<TechnicalEvidenceReceipt> {
-        if (array == null) return emptyList()
-
-        val values = mutableListOf<TechnicalEvidenceReceipt>()
-
-        for (index in 0 until array.length()) {
-            val item = array.optJSONObject(index) ?: continue
-
-            values.add(
-                TechnicalEvidenceReceipt(
-                    field = item.optString("field", ""),
-                    status = item.optString("status", "not_researched"),
-                    finding = item.optString("finding", ""),
-                    authority = item.optString("authority", ""),
-                    subject = item.optString("subject", ""),
-                    identifier = item.optString("identifier", ""),
-                    sourceUrl = item.optString("source_url", ""),
-                    sourceTitle = item.optString("source_title", "")
-                )
-            )
-        }
-
-        return values
     }
 
     private fun canonicalOrLegacyInt(

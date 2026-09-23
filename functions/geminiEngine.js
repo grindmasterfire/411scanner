@@ -14,6 +14,10 @@
  */
 
 const {
+  enforceTechnicalEvidencePrecision,
+} = require("./technicalEvidencePrecision");
+
+const {
   GoogleGenerativeAI,
 } = require("@google/generative-ai");
 
@@ -48,20 +52,17 @@ const {
 } = require("./historicalPromptContext");
 
 const {
-  estimateGeminiTokenCost,
-} = require("./tokenCostEstimator");
-
-const {
-  estimateGroundingCost,
-} = require("./groundingCostEstimator");
-
-const {
-  buildGroundingVerification,
-} = require("./groundingVerification");
-
-const {
   normalizeTechnicalEvidence,
 } = require("./technicalLedgerEvidence");
+
+const {
+  buildAttemptTelemetry,
+} = require("./providerAttemptTelemetry");
+
+const {
+  aggregateTelemetry,
+} = require("./scanTelemetryAggregation");
+
 
 const {
   measureScanComposition,
@@ -95,290 +96,6 @@ Verify the material claims needed for this 411, including target identity, offic
 
 If a fact cannot be established, mark it unresolved, not found, not applicable, or not researched as appropriate rather than assuming it.
 `;
-
-function cloneProviderUsage(usageMetadata) {
-  return JSON.parse(
-    JSON.stringify(
-      usageMetadata || {}
-    )
-  );
-}
-
-function roundMoney(value) {
-  return Number(
-    Number(value || 0)
-      .toFixed(8)
-  );
-}
-
-/**
- * Build forensic economics for one provider attempt.
- */
-function buildAttemptTelemetry(
-  response,
-  attemptNumber
-) {
-  const usageMetadata =
-    response.usageMetadata || {};
-
-  const groundingVerification =
-    buildGroundingVerification(
-      response
-    );
-
-  const tokenEconomics =
-    estimateGeminiTokenCost(
-      usageMetadata
-    );
-
-  const groundingEconomics =
-    estimateGroundingCost(
-      response
-    );
-
-  return {
-    attemptNumber,
-
-    providerUsageMetadata:
-      cloneProviderUsage(
-        usageMetadata
-      ),
-
-    groundingVerification,
-
-    promptTokenCount:
-      usageMetadata.promptTokenCount || 0,
-
-    candidatesTokenCount:
-      usageMetadata.candidatesTokenCount || 0,
-
-    totalTokenCount:
-      usageMetadata.totalTokenCount || 0,
-
-    cachedContentTokenCount:
-      usageMetadata.cachedContentTokenCount || 0,
-
-    thoughtsTokenCount:
-      usageMetadata.thoughtsTokenCount || 0,
-
-    finishReason:
-      response.candidates?.[0]
-        ?.finishReason || null,
-
-    tokenEconomics,
-
-    groundingEconomics,
-
-    estimatedResearchCostUsdAtPaidRate:
-      roundMoney(
-        tokenEconomics
-          .estimatedTokenCostUsd +
-        groundingEconomics
-          .estimatedGroundingCostUsdAtPaidRate
-      ),
-  };
-}
-
-function sumAttempts(
-  attempts,
-  field
-) {
-  return attempts.reduce(
-    (total, attempt) =>
-      total +
-      Number(
-        attempt?.[field] || 0
-      ),
-    0
-  );
-}
-
-/**
- * Aggregate all provider attempts into one request-level telemetry record.
- *
- * Raw usage remains available per attempt while the existing top-level
- * fields become request totals so T07 accounting charges every attempt.
- */
-function aggregateTelemetry(
-  attempts,
-  historicalEvidencePacket
-) {
-  const finalAttempt =
-    attempts[
-      attempts.length - 1
-    ];
-
-  const tokenCost =
-    attempts.reduce(
-      (total, attempt) =>
-        total +
-        Number(
-          attempt
-            ?.tokenEconomics
-            ?.estimatedTokenCostUsd || 0
-        ),
-      0
-    );
-
-  const groundingCost =
-    attempts.reduce(
-      (total, attempt) =>
-        total +
-        Number(
-          attempt
-            ?.groundingEconomics
-            ?.estimatedGroundingCostUsdAtPaidRate || 0
-        ),
-      0
-    );
-
-  const googleSearchQueryCount =
-    attempts.reduce(
-      (total, attempt) =>
-        total +
-        Number(
-          attempt
-            ?.groundingEconomics
-            ?.googleSearchQueryCount || 0
-        ),
-      0
-    );
-
-  return {
-    operation:
-      "initial_scan",
-
-    model:
-      MODEL_NAME,
-
-    attemptCount:
-      attempts.length,
-
-    attempts:
-      attempts.map(
-        (attempt) => ({
-          attemptNumber:
-            attempt.attemptNumber,
-
-          groundingVerification:
-            attempt.groundingVerification,
-
-          promptTokenCount:
-            attempt.promptTokenCount,
-
-          candidatesTokenCount:
-            attempt.candidatesTokenCount,
-
-          totalTokenCount:
-            attempt.totalTokenCount,
-
-          cachedContentTokenCount:
-            attempt.cachedContentTokenCount,
-
-          thoughtsTokenCount:
-            attempt.thoughtsTokenCount,
-
-          finishReason:
-            attempt.finishReason,
-
-          tokenEconomics:
-            attempt.tokenEconomics,
-
-          groundingEconomics:
-            attempt.groundingEconomics,
-
-          estimatedResearchCostUsdAtPaidRate:
-            attempt
-              .estimatedResearchCostUsdAtPaidRate,
-        })
-      ),
-
-    providerUsageMetadata:
-      finalAttempt
-        .providerUsageMetadata,
-
-    providerUsageMetadataAttempts:
-      attempts.map(
-        (attempt) =>
-          attempt
-            .providerUsageMetadata
-      ),
-
-    groundingVerification:
-      finalAttempt
-        .groundingVerification,
-
-    promptTokenCount:
-      sumAttempts(
-        attempts,
-        "promptTokenCount"
-      ),
-
-    candidatesTokenCount:
-      sumAttempts(
-        attempts,
-        "candidatesTokenCount"
-      ),
-
-    totalTokenCount:
-      sumAttempts(
-        attempts,
-        "totalTokenCount"
-      ),
-
-    cachedContentTokenCount:
-      sumAttempts(
-        attempts,
-        "cachedContentTokenCount"
-      ),
-
-    thoughtsTokenCount:
-      sumAttempts(
-        attempts,
-        "thoughtsTokenCount"
-      ),
-
-    finishReason:
-      finalAttempt.finishReason,
-
-    historicalContextUsed:
-      Boolean(
-        historicalEvidencePacket
-      ),
-
-    historicalStateCount:
-      historicalEvidencePacket
-        ?.stateCount || 0,
-
-    tokenEconomics: {
-      ...finalAttempt
-        .tokenEconomics,
-
-      estimatedTokenCostUsd:
-        roundMoney(
-          tokenCost
-        ),
-    },
-
-    groundingEconomics: {
-      ...finalAttempt
-        .groundingEconomics,
-
-      googleSearchQueryCount,
-
-      estimatedGroundingCostUsdAtPaidRate:
-        roundMoney(
-          groundingCost
-        ),
-    },
-
-    estimatedResearchCostUsdAtPaidRate:
-      roundMoney(
-        tokenCost +
-        groundingCost
-      ),
-  };
-}
 
 async function analyzeImageWithGemini(
   apiKey,
@@ -513,7 +230,8 @@ Do not generate Deep Dive.`;
   const telemetry =
     aggregateTelemetry(
       attempts,
-      historicalEvidencePacket
+      historicalEvidencePacket,
+      MODEL_NAME
     );
 
   const finalVerification =
@@ -564,8 +282,10 @@ Do not generate Deep Dive.`;
    */
   normalizeTechnicalEvidence(
     parsedData,
-    finalVerification.sources
+    finalVerification
   );
+
+    enforceTechnicalEvidencePrecision(parsedData);
 
   const floorRaisers =
     extractFloorRaisers(

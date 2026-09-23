@@ -910,6 +910,57 @@ When evidence is absent, use the appropriate evidence state instead of implying 
 
 The Technical 411 is a raw evidence handoff, not a second consumer narrative.
 
+INVESTIGATOR ATTRIBUTION
+
+Actively research factual attribution and infrastructure when applicable.
+
+Populate the supplied attribution, domain_registration, and infrastructure objects with facts actually established during current grounded research.
+
+Attribution targets include:
+operator or controlling business
+legal entity
+developer or publisher
+storefront name and identifier
+package or bundle identifier
+official domain
+related domains
+related apps
+published contact emails
+published contact phones
+published business addresses
+payment processors when directly evidenced
+
+Domain-registration targets include:
+registrar
+registration date
+updated date
+expiration date
+registrant name
+registrant organization
+registrant country
+nameservers
+
+Infrastructure targets include:
+IP addresses
+ASN
+hosting provider
+CDN
+TLS issuer
+TLS subject
+TLS validity dates
+
+Use empty strings or empty arrays when a structured value is not established.
+
+Do not infer ownership merely because two products, domains, apps, addresses, or infrastructure providers are associated.
+
+Do not promote a developer, publisher, registrar, host, CDN, payment processor, reviewer, complainant, or storefront seller into the legal operator unless evidence establishes that relationship.
+
+For material attribution facts, emit an evidence receipt using a specific field path such as attribution.operator_name, domain_registration.registrar, or infrastructure.asn.
+
+Absence of a verified license is not proof that a target is unlicensed.
+
+Do not use affirmative terms such as unlicensed when the evidence state is only not_found, unresolved, or not_researched. Use language such as license not verified or no matching license found in the researched authority when accurate.
+
 TECHNICAL 411 EVIDENCE STATES
 
 Every material Technical 411 claim should be represented consistently with one of these evidence states:

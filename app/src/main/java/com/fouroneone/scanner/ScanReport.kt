@@ -63,55 +63,6 @@ data class SolicitationPattern(
     val patternKey: String = ""
 )
 
-data class NetworkTelemetry(
-    val appPackageOrDomain: String = "",
-    val hostCdn: String = "",
-    val domainAgeDays: Int? = null,
-    val tlsCertificateStatus: String? = null,
-    val groundingSources: List<String> = emptyList()
-)
-
-data class Monetization(
-    val revenueModel: String = "",
-    val pricing: String = "",
-    val affiliateDisclosure: String = "",
-    val guaranteeTerms: String = ""
-)
-
-data class RegulatoryRecord(
-    val licenseStatus: String = "",
-    val bbbRecord: String = "",
-    val ftcRecord: String = "",
-    val complaintPattern: String = "",
-    val reviewSpread: String = ""
-)
-
-/**
- * Machine-readable Technical 411 claim receipt.
- *
- * The backend accepts "verified" only when the proposed source survives
- * provider-grounding validation.
- */
-data class TechnicalEvidenceReceipt(
-    val field: String = "",
-    val status: String = "not_researched",
-    val finding: String = "",
-    val authority: String = "",
-    val subject: String = "",
-    val identifier: String = "",
-    val sourceUrl: String = "",
-    val sourceTitle: String = ""
-)
-
-data class TechnicalLedger(
-    val networkTelemetry: NetworkTelemetry = NetworkTelemetry(),
-    val monetization: Monetization = Monetization(),
-    val regulatoryRecord: RegulatoryRecord = RegulatoryRecord(),
-    val evidenceReceipts: List<TechnicalEvidenceReceipt> = emptyList(),
-    val complaintPattern: String = "",
-    val reviewSpread: String = ""
-)
-
 data class Alternative(
     val name: String = "",
     val destinationUrl: String = "",

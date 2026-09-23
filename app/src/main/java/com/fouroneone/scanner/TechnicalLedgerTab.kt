@@ -197,38 +197,13 @@ fun TechnicalLedgerTab(
             )
         }
 
-        if (receipts.isNotEmpty()) {
-            LedgerCard("EVIDENCE RECEIPTS") {
-                receipts.forEach { receipt ->
-                    val label =
-                        receipt.field
-                            .replace("_", " ")
-                            .uppercase()
+        TechnicalAttributionSection(
+            technicalLedger
+        )
 
-                    val finding =
-                        receipt.finding.ifBlank {
-                            when (receipt.status) {
-                                "not_found" -> "Relevant research found no matching record."
-                                "not_applicable" -> "Not applicable."
-                                "unresolved" -> "Research could not resolve this field."
-                                "not_researched" -> "Not researched in this investigation."
-                                else -> "No finding supplied."
-                            }
-                        }
-
-                    LedgerItem(
-                        "$label · ${receipt.status.uppercase()}",
-                        finding
-                    )
-                }
-            }
-        }
-
-        val forensicUrl =
-            ForensicUrlResolver.resolve(
-                consumerCard,
-                technicalLedger
-            )
+        TechnicalEvidenceSection(
+            receipts
+        )
 
         val score =
             consumerCard?.actionMeterScore ?: 0.0
@@ -246,40 +221,6 @@ fun TechnicalLedgerTab(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Button(
-                onClick = {
-                    context.startActivity(
-                        Intent(
-                            Intent.ACTION_VIEW,
-                            Uri.parse(forensicUrl)
-                        )
-                    )
-                },
-                modifier = Modifier
-                    .weight(1f)
-                    .height(46.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF1E1B2E)
-                ),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Icon(
-                    Icons.Default.CheckCircle,
-                    contentDescription = null,
-                    tint = Color.White
-                )
-
-                Spacer(
-                    modifier = Modifier.padding(horizontal = 3.dp)
-                )
-
-                Text(
-                    "Inspect Source",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
             if (
                 score >= 8.0 &&
                 hasVerifiedFtcRecord

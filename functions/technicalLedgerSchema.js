@@ -18,6 +18,12 @@
  * rendering while evidence receipts become the machine-readable authority.
  */
 
+const {
+  TECHNICAL_ATTRIBUTION_SCHEMA,
+  DOMAIN_REGISTRATION_SCHEMA,
+  INFRASTRUCTURE_SCHEMA,
+} = require("./technicalAttributionSchema");
+
 const EVIDENCE_RECEIPT_SCHEMA = {
   type: "object",
 
@@ -66,6 +72,16 @@ const TECHNICAL_LEDGER_SCHEMA = {
   type: "object",
 
   properties: {
+
+    attribution:
+      TECHNICAL_ATTRIBUTION_SCHEMA,
+
+    domain_registration:
+      DOMAIN_REGISTRATION_SCHEMA,
+
+    infrastructure:
+      INFRASTRUCTURE_SCHEMA,
+
     network_telemetry: {
       type: "object",
 
@@ -101,6 +117,7 @@ const TECHNICAL_LEDGER_SCHEMA = {
       },
 
       required: [
+
         "app_package_or_domain",
         "host_cdn",
         "grounding_sources"
@@ -185,6 +202,9 @@ const TECHNICAL_LEDGER_SCHEMA = {
   },
 
   required: [
+    "attribution",
+    "domain_registration",
+    "infrastructure",
     "network_telemetry",
     "monetization",
     "regulatory_record",
