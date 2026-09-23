@@ -173,27 +173,27 @@ fun TechnicalLedgerTab(
         LedgerCard("REGULATORY & COMPLAINT RECORD") {
             LedgerItem(
                 "License Status",
-                reg.licenseStatus.ifBlank { "Not established" }
+                reg.licenseStatus.evidenceStateLabel()
             )
 
             LedgerItem(
                 "BBB Record",
-                reg.bbbRecord.ifBlank { "Not established" }
+                reg.bbbRecord.evidenceStateLabel()
             )
 
             LedgerItem(
                 "FTC Record",
-                reg.ftcRecord.ifBlank { "Not established" }
+                reg.ftcRecord.evidenceStateLabel()
             )
 
             LedgerItem(
                 "Complaint Pattern",
-                reg.complaintPattern.ifBlank { "Not established" }
+                reg.complaintPattern.evidenceStateLabel()
             )
 
             LedgerItem(
                 "Review Spread",
-                reg.reviewSpread.ifBlank { "Not established" }
+                reg.reviewSpread.evidenceStateLabel()
             )
         }
 
@@ -268,6 +268,29 @@ fun TechnicalLedgerTab(
         )
     }
 }
+
+
+private fun String.evidenceStateLabel():
+    String =
+    when (trim().lowercase()) {
+        "" ->
+            "Not established"
+
+        "unresolved" ->
+            "Unresolved"
+
+        "not_found" ->
+            "Not found"
+
+        "not_researched" ->
+            "Not researched"
+
+        "not_applicable" ->
+            "Not applicable"
+
+        else ->
+            this
+    }
 
 @Composable
 private fun LedgerCard(

@@ -23,7 +23,10 @@ data class TechnicalAttribution(
     val contactEmails: List<String> = emptyList(),
     val contactPhones: List<String> = emptyList(),
     val businessAddresses: List<String> = emptyList(),
-    val paymentProcessors: List<String> = emptyList()
+    val paymentProcessors: List<String> = emptyList(),
+    val aliases: List<String> = emptyList(),
+    val companyRegistrationIds: List<String> = emptyList(),
+    val licenseIdentifiers: List<String> = emptyList()
 )
 
 data class DomainRegistration(

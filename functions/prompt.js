@@ -929,6 +929,13 @@ published contact emails
 published contact phones
 published business addresses
 payment processors when directly evidenced
+known aliases when directly evidenced
+company registration identifiers when directly evidenced
+license identifiers or license numbers when directly evidenced
+
+A company registration identifier identifies a registry record only. It does not by itself establish operator control.
+
+A license identifier or license number is an identifier only. Do not treat its presence as proof of a verified license unless the corresponding evidence receipt is verified and provider-grounded.
 
 Domain-registration targets include:
 registrar

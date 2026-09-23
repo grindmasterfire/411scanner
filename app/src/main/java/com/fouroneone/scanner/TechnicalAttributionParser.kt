@@ -63,6 +63,22 @@ object TechnicalAttributionParser {
             paymentProcessors =
                 TechnicalJsonValues.stringList(
                     source.optJSONArray("payment_processors")
+                ),
+            aliases =
+                TechnicalJsonValues.stringList(
+                    source.optJSONArray("aliases")
+                ),
+            companyRegistrationIds =
+                TechnicalJsonValues.stringList(
+                    source.optJSONArray(
+                        "company_registration_ids"
+                    )
+                ),
+            licenseIdentifiers =
+                TechnicalJsonValues.stringList(
+                    source.optJSONArray(
+                        "license_identifiers"
+                    )
                 )
         )
     }

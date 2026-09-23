@@ -55,6 +55,9 @@ const TECHNICAL_ATTRIBUTION_SCHEMA = {
     contact_phones: STRING_ARRAY_SCHEMA,
     business_addresses: STRING_ARRAY_SCHEMA,
     payment_processors: STRING_ARRAY_SCHEMA,
+    aliases: STRING_ARRAY_SCHEMA,
+    company_registration_ids: STRING_ARRAY_SCHEMA,
+    license_identifiers: STRING_ARRAY_SCHEMA,
   },
 
   required: [
@@ -71,6 +74,9 @@ const TECHNICAL_ATTRIBUTION_SCHEMA = {
     "contact_phones",
     "business_addresses",
     "payment_processors",
+    "aliases",
+    "company_registration_ids",
+    "license_identifiers",
   ],
 };
 

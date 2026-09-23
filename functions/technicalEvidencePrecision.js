@@ -4,10 +4,14 @@
  * @cap 150 Lines
  * @responsibility Prevent Technical 411 certainty from exceeding
  * machine-readable evidence state.
- * @dependencies None.
+ * @dependencies ./technicalFactPrecision
  * @security_gate Does not create facts or verification.
  * @owner_context 411 Scanner Technical 411.
  */
+
+const {
+  enforceTechnicalFactPrecision,
+} = require("./technicalFactPrecision");
 
 function clean(value) {
   return typeof value === "string"
@@ -15,37 +19,32 @@ function clean(value) {
     : "";
 }
 
-function hasVerifiedUnlicensedReceipt(
-  ledger
+function hasVerifiedClaim(
+  ledger,
+  pattern
 ) {
   const receipts =
-    Array.isArray(ledger?.evidence_receipts)
+    Array.isArray(
+      ledger?.evidence_receipts
+    )
       ? ledger.evidence_receipts
       : [];
 
   return receipts.some((receipt) => {
-    const field =
-      clean(receipt?.field)
-        .toLowerCase();
-
     const status =
       clean(receipt?.status)
         .toLowerCase();
 
-    const finding =
-      clean(receipt?.finding);
-
     const sourceUrl =
       clean(receipt?.source_url);
 
+    const finding =
+      clean(receipt?.finding);
+
     return (
       status === "verified" &&
-      field.includes("license") &&
-      sourceUrl.length > 0 &&
-      (
-        /\bunlicensed\b/i.test(finding) ||
-        /\bnot licensed\b/i.test(finding)
-      )
+      sourceUrl &&
+      pattern.test(finding)
     );
   });
 }
@@ -53,12 +52,17 @@ function hasVerifiedUnlicensedReceipt(
 function enforceLicensePrecision(
   ledger
 ) {
-  if (
-    !ledger ||
-    hasVerifiedUnlicensedReceipt(ledger)
-  ) {
-    return;
-  }
+  const verifiedUnlicensed =
+    hasVerifiedClaim(
+      ledger,
+      /\bunlicensed\b|\bnot licensed\b/i
+    );
+
+  const verifiedUnregulated =
+    hasVerifiedClaim(
+      ledger,
+      /\bunregulated\b/i
+    );
 
   const regulatory =
     ledger.regulatory_record;
@@ -67,7 +71,19 @@ function enforceLicensePrecision(
     regulatory &&
     /\bunlicensed\b/i.test(
       clean(regulatory.license_status)
-    )
+    ) &&
+    !verifiedUnlicensed
+  ) {
+    regulatory.license_status =
+      "unverified";
+  }
+
+  if (
+    regulatory &&
+    /\bunregulated\b/i.test(
+      clean(regulatory.license_status)
+    ) &&
+    !verifiedUnregulated
   ) {
     regulatory.license_status =
       "unverified";
@@ -84,13 +100,21 @@ function enforceLicensePrecision(
   ledger.technical_flags =
     ledger.technical_flags
       .map((flag) => {
-        const value =
-          clean(flag);
+        const value = clean(flag);
+        const matchValue = value.replace(/_/g, " ");
 
         if (
-          /\bunlicensed\b/i.test(value)
+          /\bunlicensed\b/i.test(matchValue) &&
+          !verifiedUnlicensed
         ) {
           return "Gaming license not verified";
+        }
+
+        if (
+          /\bunregulated\b/i.test(matchValue) &&
+          !verifiedUnregulated
+        ) {
+          return "Gaming regulation not verified";
         }
 
         return value;
@@ -113,6 +137,7 @@ function enforceTechnicalEvidencePrecision(
   }
 
   enforceLicensePrecision(ledger);
+  enforceTechnicalFactPrecision(ledger);
 
   return report;
 }

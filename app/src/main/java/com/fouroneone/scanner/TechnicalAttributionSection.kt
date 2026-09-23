@@ -60,6 +60,15 @@ fun TechnicalAttributionSection(
                     .joinToString("\n"),
             "Payment Processors" to
                 ledger.attribution.paymentProcessors
+                    .joinToString("\n"),
+            "Aliases" to
+                ledger.attribution.aliases
+                    .joinToString("\n"),
+            "Company Registration IDs" to
+                ledger.attribution.companyRegistrationIds
+                    .joinToString("\n"),
+            "License Identifiers" to
+                ledger.attribution.licenseIdentifiers
                     .joinToString("\n")
         )
     )
