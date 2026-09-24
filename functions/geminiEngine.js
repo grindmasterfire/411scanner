@@ -146,7 +146,7 @@ async function analyzeImageWithGemini(
           RESPONSE_SCHEMA,
 
         temperature:
-          0.4,
+          1.0,
 
         maxOutputTokens:
           7000,
