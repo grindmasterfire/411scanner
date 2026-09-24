@@ -43,6 +43,7 @@ const { getHistoricalResearchContext } =
 
 const { analyzeImageWithGemini } = require("./geminiEngine");
 const { persistFreshScanResult } = require("./scanResultPersistence");
+const { resolveAllLinks } = require("./linkResolver");
 
 const {
   createScanRequestId,
@@ -243,6 +244,9 @@ async function executeScan(
       cacheKey
     );
 
+  const linkEvidence =
+    await resolveAllLinks(ocrText);
+
   const apiKey =
     process.env.GEMINI_API_KEY ||
     process.env.GOOGLE_GEMINI_API_KEY;
@@ -268,7 +272,8 @@ async function executeScan(
         imageBase64,
         mimeType,
         prompt,
-        historicalContext.evidencePacket
+        historicalContext.evidencePacket,
+        linkEvidence
       );
   } catch (error) {
     if (

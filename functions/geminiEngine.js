@@ -102,7 +102,8 @@ async function analyzeImageWithGemini(
   cleanBase64,
   mimeType,
   prompt,
-  historicalEvidencePacket = null
+  historicalEvidencePacket = null,
+  linkEvidence = null
 ) {
   if (!cleanBase64) {
     throw new HttpsError(
@@ -184,6 +185,13 @@ Do not generate Deep Dive.`;
       historicalEvidencePacket
     );
 
+  const linkBlock = buildLinkEvidenceBlock(linkEvidence);
+
+  const finalPrompt = linkBlock
+
+    ? `${promptToExecute}\n\n${linkBlock}`
+
+    : promptToExecute;
   const attempts = [];
 
   async function runAttempt(
@@ -211,7 +219,7 @@ Do not generate Deep Dive.`;
 
   let acceptedResponse =
     await runAttempt(
-      promptToExecute,
+      finalPrompt,
       1
     );
 
@@ -222,7 +230,7 @@ Do not generate Deep Dive.`;
   ) {
     acceptedResponse =
       await runAttempt(
-        `${promptToExecute}\n${GROUNDING_RETRY_INSTRUCTION}`,
+        `${finalPrompt}\n${GROUNDING_RETRY_INSTRUCTION}`,
         2
       );
   }
@@ -243,9 +251,15 @@ Do not generate Deep Dive.`;
    * If grounding still fails, reject before parsing, scoring, persistence,
    * solicitation history, or Cache Bank admission.
    */
+  const hasLinkEvidence =
+    linkEvidence &&
+    linkEvidence.links &&
+    linkEvidence.links.length > 0;
+
   if (
     !finalVerification
-      .verified
+      .verified &&
+    !hasLinkEvidence
   ) {
     const error =
       new HttpsError(
@@ -260,6 +274,15 @@ Do not generate Deep Dive.`;
       telemetry;
 
     throw error;
+  }
+
+  if (
+    !finalVerification
+      .verified &&
+    hasLinkEvidence
+  ) {
+    telemetry.groundingSupplementedByLinkEvidence =
+      true;
   }
 
   const rawText =
@@ -352,6 +375,46 @@ Do not generate Deep Dive.`;
 
     composition,
   };
+}
+
+/**
+ * Build a prompt block from resolved link evidence.
+ * Returns null if no links were resolved.
+ */
+function buildLinkEvidenceBlock(linkEvidence) {
+  if (
+    !linkEvidence ||
+    !linkEvidence.links ||
+    linkEvidence.links.length === 0
+  ) {
+    return null;
+  }
+
+  const lines = [
+    "DETERMINISTIC LINK EVIDENCE (pre-resolved, not from search):",
+  ];
+
+  linkEvidence.links.forEach((link, i) => {
+    const hopChain = link.hops.length > 0
+      ? link.hops.map((h) => h.to).join(" → ")
+      : "(no redirects)";
+
+    lines.push(
+      `Link ${i + 1}: ${link.submittedUrl}`,
+      `  Redirect chain: ${hopChain}`,
+      `  Final URL: ${link.finalUrl}`,
+      `  Final domain: ${link.finalDomain || "unknown"}`,
+      `  HTTP status: ${link.httpStatus || link.error || "unknown"}`
+    );
+  });
+
+  lines.push(
+    "",
+    "Use this link evidence to investigate the destination",
+    "independently of search grounding results."
+  );
+
+  return lines.join("\n");
 }
 
 module.exports = {
