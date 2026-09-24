@@ -149,27 +149,55 @@ object ScanReportSectionParser {
         )
     }
 
+
+    private fun metricIntOrNull(
+        source: JSONObject,
+        key: String
+    ): Int? {
+        val value = source.opt(key)
+
+        return when (value) {
+            is Number -> value.toInt()
+            is String -> value.trim().toIntOrNull()
+            else -> null
+        }
+    }
+
     private fun canonicalOrLegacyInt(
         source: JSONObject,
-        canonical: String,
-        legacy: String
+        canonicalKey: String,
+        legacyKey: String
     ): Int =
-        if (source.has(canonical)) {
-            source.optInt(canonical, 0)
-        } else {
-            source.optInt(legacy, 0)
-        }
+        metricIntOrNull(
+            source,
+            canonicalKey
+        ) ?: metricIntOrNull(
+            source,
+            legacyKey
+        ) ?: 0
+
 
     private fun canonicalOrLegacyString(
         source: JSONObject,
-        canonical: String,
-        legacy: String
-    ): String =
-        if (source.has(canonical)) {
-            source.optString(canonical, "")
-        } else {
-            source.optString(legacy, "")
+        canonicalKey: String,
+        legacyKey: String
+    ): String {
+        val canonical =
+            source.opt(canonicalKey)
+
+        if (canonical is String) {
+            return canonical
         }
+
+        val legacy =
+            source.opt(legacyKey)
+
+        return if (legacy is String) {
+            legacy
+        } else {
+            ""
+        }
+    }
 
     private fun nullableInt(source: JSONObject, key: String): Int? =
         if (source.isNull(key)) null else source.optInt(key)

@@ -135,6 +135,45 @@ function groundedUrlAliases(source) {
   ];
 }
 
+function isUsableGroundedSourceUrl(value) {
+  const normalized =
+    normalizeUrl(value);
+
+  if (!normalized) {
+    return false;
+  }
+
+  const parsed =
+    new URL(normalized);
+
+  if (
+    parsed.protocol !== "https:" &&
+    parsed.protocol !== "http:"
+  ) {
+    return false;
+  }
+
+  return !(
+    parsed.hostname.toLowerCase() ===
+      "vertexaisearch.cloud.google.com" &&
+    parsed.pathname
+      .toLowerCase()
+      .startsWith(
+        "/grounding-api-redirect/"
+      )
+  );
+}
+
+function preferredGroundedSourceUrl(source) {
+  for (const candidate of groundedUrlAliases(source)) {
+    if (isUsableGroundedSourceUrl(candidate)) {
+      return normalizeUrl(candidate);
+    }
+  }
+
+  return "";
+}
+
 function buildGroundedSourceMap(
   groundedSources = []
 ) {
@@ -142,7 +181,7 @@ function buildGroundedSourceMap(
 
   for (const source of groundedSources) {
     const uri =
-      normalizeUrl(source?.uri);
+      preferredGroundedSourceUrl(source);
 
     if (!uri) {
       continue;
@@ -426,7 +465,7 @@ function normalizeTechnicalEvidence(
       groundedSources
         .map(
           (source) =>
-            normalizeUrl(source?.uri)
+            preferredGroundedSourceUrl(source)
         )
         .filter(Boolean);
 

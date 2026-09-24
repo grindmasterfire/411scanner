@@ -179,5 +179,32 @@ private fun TechnicalEvidenceReceipt.displayFinding():
 
 private fun TechnicalEvidenceReceipt.hasInspectableSource():
     Boolean =
-    sourceUrl.startsWith("https://") ||
-        sourceUrl.startsWith("http://")
+    isInspectableTechnicalSource(sourceUrl)
+
+internal fun isInspectableTechnicalSource(
+    sourceUrl: String
+): Boolean {
+    val uri =
+        runCatching {
+            java.net.URI(sourceUrl.trim())
+        }.getOrNull() ?: return false
+
+    val scheme =
+        uri.scheme?.lowercase()
+            ?: return false
+
+    val host =
+        uri.host?.lowercase()
+            ?: return false
+
+    if (scheme != "http" && scheme != "https") {
+        return false
+    }
+
+    return !(
+        host == "vertexaisearch.cloud.google.com" &&
+        uri.path.orEmpty()
+            .lowercase()
+            .startsWith("/grounding-api-redirect/")
+    )
+}
