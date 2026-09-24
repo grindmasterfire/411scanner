@@ -256,24 +256,21 @@ Do not generate Deep Dive.`;
     linkEvidence.links &&
     linkEvidence.links.length > 0;
 
+  /*
+   * T03a — Grounding fallback resilience.
+   * When live web grounding fails and no link evidence exists,
+   * accept the screenshot-bounded response with a disclosure flag
+   * instead of rejecting the entire scan. The user still receives
+   * deterministic intelligence from visible content.
+   */
   if (
     !finalVerification
       .verified &&
     !hasLinkEvidence
   ) {
-    const error =
-      new HttpsError(
-        "failed-precondition",
-        "411 could not establish live web grounding after the allowed retry. No diagnostic intelligence was accepted."
-      );
-
-    error.groundingRejected =
-      true;
-
-    error.scanTelemetry =
-      telemetry;
-
-    throw error;
+    telemetry.groundingFailed = true;
+    telemetry.groundingFallbackMode =
+      "screenshot_bounded";
   }
 
   if (
