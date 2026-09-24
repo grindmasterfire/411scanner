@@ -146,7 +146,7 @@ async function analyzeImageWithGemini(
           RESPONSE_SCHEMA,
 
         temperature:
-          0.2,
+          0.4,
 
         maxOutputTokens:
           7000,
@@ -285,8 +285,13 @@ Do not generate Deep Dive.`;
       true;
   }
 
-  const rawText =
-    acceptedResponse.text();
+  const rawTextUnsafe = acceptedResponse.text();
+    // Strip markdown fences and dangerous control chars (preserve newlines/tabs)
+    const rawText = rawTextUnsafe
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/\s*```$/, '')
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
 
   const parsedData =
     safeParseGeminiJson(

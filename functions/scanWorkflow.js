@@ -292,6 +292,33 @@ async function executeScan(
       );
     }
 
+    /*
+     * T03 — Provider failure resilience.
+     * Gemini 503 / 429 / timeout must not burn user entitlements.
+     * Return "unavailable" so the client can offer a free retry.
+     */
+    const msg =
+      (error?.message || "").toLowerCase();
+    const isProviderFailure =
+      msg.includes("503") ||
+      msg.includes("429") ||
+      msg.includes("unavailable") ||
+      msg.includes("overloaded") ||
+      msg.includes("resource_exhausted") ||
+      msg.includes("quota") ||
+      msg.includes("econnreset") ||
+      msg.includes("etimedout") ||
+      msg.includes("socket hang up");
+
+    if (isProviderFailure) {
+      throw new HttpsError(
+        "unavailable",
+        "The analysis provider is temporarily " +
+        "unavailable. Your scan was not counted. " +
+        "Please try again in a moment."
+      );
+    }
+
     throw error;
   }
 

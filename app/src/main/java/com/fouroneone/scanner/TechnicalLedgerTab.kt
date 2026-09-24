@@ -222,8 +222,7 @@ fun TechnicalLedgerTab(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             if (
-                score >= 8.0 &&
-                hasVerifiedFtcRecord
+                score >= 8.5
             ) {
                 OutlinedButton(
                     onClick = {
