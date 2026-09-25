@@ -131,6 +131,18 @@ Cover every evidence category relevant to the six diagnostic vectors:
 - Data collection scope and third-party sharing
 
 If a source yields no results, state that explicitly rather than omitting it.
+
+MANDATORY ALTERNATIVES DISCOVERY (ACTION METER 5.6+):
+If the target shows significant risk factors suggesting an Action Meter score of 5.6 or above (crypto participation, predatory mechanics, high financial risk, deceptive practices, aggressive data collection, ad-farm patterns, or phantom balance schemes), you MUST actively search for 2 to 3 legitimate alternatives in the same category.
+
+For each alternative found, include:
+- The real name of the alternative
+- A real destination URL (Google Play Store link, Apple App Store link, or official website URL)
+- Why it is a relevant alternative for the user
+
+Use category-level Google searches such as "best [category] app", "legitimate [category] alternative", or "[category] top rated app" to find real alternatives with real URLs.
+
+Do NOT skip this step on high-risk targets. Do NOT return zero alternatives when the target scores 5.6 or above.
 `;
 
 function cloneProviderUsage(usageMetadata) {
@@ -429,7 +441,8 @@ async function analyzeImageWithGemini(
   cleanBase64,
   mimeType,
   prompt,
-  historicalEvidencePacket = null
+  historicalEvidencePacket = null,
+  linkEvidence = null
 ) {
   if (!cleanBase64) {
     throw new HttpsError(
@@ -473,7 +486,7 @@ async function analyzeImageWithGemini(
 
       generationConfig: {
         temperature:
-          0.2,
+          1.0,
 
         maxOutputTokens:
           8192,
@@ -533,8 +546,47 @@ Do not treat similar patterns as proof of the same actor.
 
 Do not generate Deep Dive.`;
 
+  /*
+   * Inject deterministic link-resolution evidence when available.
+   * This gives Pass 1 redirect-chain facts before grounded search,
+   * so low-footprint targets get destination evidence even when
+   * Google has nothing indexed.
+   */
+  const linkEvidenceBlock =
+    linkEvidence &&
+    Array.isArray(linkEvidence.links) &&
+    linkEvidence.links.length > 0
+      ? `\nDETERMINISTIC LINK RESOLUTION EVIDENCE:\n${
+          linkEvidence.links
+            .map((link) => {
+              const hops =
+                link.hops && link.hops.length > 0
+                  ? link.hops
+                      .map(
+                        (hop) =>
+                          `  ${hop.from} → ${hop.to} (${hop.status})`
+                      )
+                      .join("\n")
+                  : "  (no redirects)";
+
+              return (
+                `Submitted: ${link.submittedUrl}\n` +
+                `Final: ${link.finalUrl}\n` +
+                `Domain: ${link.finalDomain || "unknown"}\n` +
+                `Path: ${link.finalPath || "/"}\n` +
+                `HTTP: ${link.httpStatus || "unknown"}\n` +
+                `Redirect chain:\n${hops}` +
+                (link.error
+                  ? `\nError: ${link.error}`
+                  : "")
+              );
+            })
+            .join("\n---\n")
+        }\n`
+      : "";
+
   const groundedBasePrompt =
-    `${basePrompt}\n${MANDATORY_GROUNDING_INSTRUCTION}\n${RESEARCH_OUTPUT_INSTRUCTION}`;
+    `${basePrompt}\n${MANDATORY_GROUNDING_INSTRUCTION}\n${linkEvidenceBlock}${RESEARCH_OUTPUT_INSTRUCTION}`;
 
   const promptToExecute =
     buildHistoricalResearchPrompt(
@@ -648,6 +700,7 @@ Instructions:
 - Complete all JSON fields according to the response schema.
 - Derive all six risk vectors from the evidence in the dossier.
 - Identify applicable Action Meter context signals and confirmed Floor Raisers.
+- Populate alternatives.discovery_items using only real alternatives found in the research dossier. Each entry needs a real name, a real destination_url from the dossier, a relationship type (comparative, complementary, or adjacent), and a one-line description. For high-risk targets (Action Meter 8.0+), prioritize safer alternatives when they appear in the dossier. If the dossier contains no alternatives, return an empty discovery_items array rather than inventing entries.
 - For solicitation recognition, describe the solicitation pattern independently of confirmed actor identity.`;
 
   const synthesisResult =
