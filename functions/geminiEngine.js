@@ -2,20 +2,28 @@
  * @file functions/geminiEngine.js
  * @class Class 5
  * @cap 600 Lines
- * @responsibility Execute grounded Gemini investigations, retry one ungrounded provider attempt, aggregate request economics, validate Technical 411 evidence, and finalize the server-owned report.
+ * @responsibility Execute two-pass grounded Gemini investigations (Pass 1:
+ *   unconstrained research with Google Search Grounding; Pass 2: structured
+ *   JSON synthesis from the research dossier), retry one ungrounded Pass 1
+ *   attempt, aggregate request economics, validate Technical 411 evidence,
+ *   and finalize the server-owned report.
+ * @architecture Two-pass pipeline resolves the documented Gemini API
+ *   limitation where responseMimeType + responseSchema on the same call as
+ *   googleSearch throttles search depth from 3-8 queries to 0-1 (Gemini
+ *   Cookbook Issue #1274). Pass 1 runs search unconstrained; Pass 2 runs
+ *   schema compliance without search tools.
  * @dependencies @google/generative-ai, firebase-functions/v2/https,
  *               ./prompt, ./geminiResponseSchema, ./geminiReportParser,
  *               ./solicitationPattern, ./actionMeter,
  *               ./historicalPromptContext, ./tokenCostEstimator,
  *               ./groundingCostEstimator, ./groundingVerification,
  *               ./technicalLedgerEvidence, ./scanCompositionMeter
- * @security_gate Fresh intelligence cannot reach scoring, persistence, or Cache Bank admission unless provider metadata proves live Google Search grounding and grounded web sources.
+ * @security_gate Fresh intelligence cannot reach scoring, persistence, or
+ *   Cache Bank admission unless Pass 1 provider metadata proves live Google
+ *   Search grounding and grounded web sources. Pass 2 never fires if Pass 1
+ *   grounding fails.
  * @owner_context 411 Scanner diagnostic engine.
  */
-
-const {
-  enforceTechnicalEvidencePrecision,
-} = require("./technicalEvidencePrecision");
 
 const {
   GoogleGenerativeAI,
@@ -52,17 +60,20 @@ const {
 } = require("./historicalPromptContext");
 
 const {
+  estimateGeminiTokenCost,
+} = require("./tokenCostEstimator");
+
+const {
+  estimateGroundingCost,
+} = require("./groundingCostEstimator");
+
+const {
+  buildGroundingVerification,
+} = require("./groundingVerification");
+
+const {
   normalizeTechnicalEvidence,
 } = require("./technicalLedgerEvidence");
-
-const {
-  buildAttemptTelemetry,
-} = require("./providerAttemptTelemetry");
-
-const {
-  aggregateTelemetry,
-} = require("./scanTelemetryAggregation");
-
 
 const {
   measureScanComposition,
@@ -97,13 +108,328 @@ Verify the material claims needed for this 411, including target identity, offic
 If a fact cannot be established, mark it unresolved, not found, not applicable, or not researched as appropriate rather than assuming it.
 `;
 
+/**
+ * Pass 1 output directive. Forces prose evidence dossier instead of JSON
+ * so the model's full search-query generation budget is available.
+ */
+const RESEARCH_OUTPUT_INSTRUCTION = `
+OUTPUT FORMAT FOR THIS PASS:
+Return your findings as a detailed factual research dossier in PLAIN TEXT.
+Do NOT return JSON. Do NOT structure output as a response schema.
+
+Cover every evidence category relevant to the six diagnostic vectors:
+- Target identity and official destination
+- Business model, pricing, and monetization mechanics
+- BBB listing, rating, and complaint history
+- FTC enforcement actions, advisories, or consumer warnings
+- State business registrations and regulatory actions
+- Trustpilot review profile, rating counts, and complaint patterns
+- App Store / Google Play Store review metrics and developer identity
+- WHOIS domain registration history and registrar details
+- Complaint patterns, regulatory sanctions, and legal actions
+- Ad delivery mechanics, dark patterns, and friction traps
+- Data collection scope and third-party sharing
+
+If a source yields no results, state that explicitly rather than omitting it.
+`;
+
+function cloneProviderUsage(usageMetadata) {
+  return JSON.parse(
+    JSON.stringify(
+      usageMetadata || {}
+    )
+  );
+}
+
+function roundMoney(value) {
+  return Number(
+    Number(value || 0)
+      .toFixed(8)
+  );
+}
+
+/**
+ * Build forensic economics for one provider attempt.
+ */
+function buildAttemptTelemetry(
+  response,
+  attemptNumber,
+  passLabel
+) {
+  const usageMetadata =
+    response.usageMetadata || {};
+
+  const groundingVerification =
+    buildGroundingVerification(
+      response
+    );
+
+  const tokenEconomics =
+    estimateGeminiTokenCost(
+      usageMetadata
+    );
+
+  const groundingEconomics =
+    estimateGroundingCost(
+      response
+    );
+
+  return {
+    attemptNumber,
+
+    passLabel:
+      passLabel || "research",
+
+    providerUsageMetadata:
+      cloneProviderUsage(
+        usageMetadata
+      ),
+
+    groundingVerification,
+
+    promptTokenCount:
+      usageMetadata.promptTokenCount || 0,
+
+    candidatesTokenCount:
+      usageMetadata.candidatesTokenCount || 0,
+
+    totalTokenCount:
+      usageMetadata.totalTokenCount || 0,
+
+    cachedContentTokenCount:
+      usageMetadata.cachedContentTokenCount || 0,
+
+    thoughtsTokenCount:
+      usageMetadata.thoughtsTokenCount || 0,
+
+    finishReason:
+      response.candidates?.[0]
+        ?.finishReason || null,
+
+    tokenEconomics,
+
+    groundingEconomics,
+
+    estimatedResearchCostUsdAtPaidRate:
+      roundMoney(
+        tokenEconomics
+          .estimatedTokenCostUsd +
+        groundingEconomics
+          .estimatedGroundingCostUsdAtPaidRate
+      ),
+  };
+}
+
+function sumAttempts(
+  attempts,
+  field
+) {
+  return attempts.reduce(
+    (total, attempt) =>
+      total +
+      Number(
+        attempt?.[field] || 0
+      ),
+    0
+  );
+}
+
+/**
+ * Aggregate all provider attempts into one request-level telemetry record.
+ *
+ * Raw usage remains available per attempt while the existing top-level
+ * fields become request totals so T07 accounting charges every attempt.
+ */
+function aggregateTelemetry(
+  attempts,
+  historicalEvidencePacket
+) {
+  const finalAttempt =
+    attempts[
+      attempts.length - 1
+    ];
+
+  const tokenCost =
+    attempts.reduce(
+      (total, attempt) =>
+        total +
+        Number(
+          attempt
+            ?.tokenEconomics
+            ?.estimatedTokenCostUsd || 0
+        ),
+      0
+    );
+
+  const groundingCost =
+    attempts.reduce(
+      (total, attempt) =>
+        total +
+        Number(
+          attempt
+            ?.groundingEconomics
+            ?.estimatedGroundingCostUsdAtPaidRate || 0
+        ),
+      0
+    );
+
+  const googleSearchQueryCount =
+    attempts.reduce(
+      (total, attempt) =>
+        total +
+        Number(
+          attempt
+            ?.groundingEconomics
+            ?.googleSearchQueryCount || 0
+        ),
+      0
+    );
+
+  return {
+    operation:
+      "initial_scan_two_pass",
+
+    model:
+      MODEL_NAME,
+
+    attemptCount:
+      attempts.length,
+
+    attempts:
+      attempts.map(
+        (attempt) => ({
+          attemptNumber:
+            attempt.attemptNumber,
+
+          passLabel:
+            attempt.passLabel,
+
+          groundingVerification:
+            attempt.groundingVerification,
+
+          promptTokenCount:
+            attempt.promptTokenCount,
+
+          candidatesTokenCount:
+            attempt.candidatesTokenCount,
+
+          totalTokenCount:
+            attempt.totalTokenCount,
+
+          cachedContentTokenCount:
+            attempt.cachedContentTokenCount,
+
+          thoughtsTokenCount:
+            attempt.thoughtsTokenCount,
+
+          finishReason:
+            attempt.finishReason,
+
+          tokenEconomics:
+            attempt.tokenEconomics,
+
+          groundingEconomics:
+            attempt.groundingEconomics,
+
+          estimatedResearchCostUsdAtPaidRate:
+            attempt
+              .estimatedResearchCostUsdAtPaidRate,
+        })
+      ),
+
+    providerUsageMetadata:
+      finalAttempt
+        .providerUsageMetadata,
+
+    providerUsageMetadataAttempts:
+      attempts.map(
+        (attempt) =>
+          attempt
+            .providerUsageMetadata
+      ),
+
+    groundingVerification:
+      finalAttempt
+        .groundingVerification,
+
+    promptTokenCount:
+      sumAttempts(
+        attempts,
+        "promptTokenCount"
+      ),
+
+    candidatesTokenCount:
+      sumAttempts(
+        attempts,
+        "candidatesTokenCount"
+      ),
+
+    totalTokenCount:
+      sumAttempts(
+        attempts,
+        "totalTokenCount"
+      ),
+
+    cachedContentTokenCount:
+      sumAttempts(
+        attempts,
+        "cachedContentTokenCount"
+      ),
+
+    thoughtsTokenCount:
+      sumAttempts(
+        attempts,
+        "thoughtsTokenCount"
+      ),
+
+    finishReason:
+      finalAttempt.finishReason,
+
+    historicalContextUsed:
+      Boolean(
+        historicalEvidencePacket
+      ),
+
+    historicalStateCount:
+      historicalEvidencePacket
+        ?.stateCount || 0,
+
+    tokenEconomics: {
+      ...finalAttempt
+        .tokenEconomics,
+
+      estimatedTokenCostUsd:
+        roundMoney(
+          tokenCost
+        ),
+    },
+
+    groundingEconomics: {
+      ...finalAttempt
+        .groundingEconomics,
+
+      googleSearchQueryCount,
+
+      estimatedGroundingCostUsdAtPaidRate:
+        roundMoney(
+          groundingCost
+        ),
+    },
+
+    estimatedResearchCostUsdAtPaidRate:
+      roundMoney(
+        tokenCost +
+        groundingCost
+      ),
+  };
+}
+
 async function analyzeImageWithGemini(
   apiKey,
   cleanBase64,
   mimeType,
   prompt,
-  historicalEvidencePacket = null,
-  linkEvidence = null
+  historicalEvidencePacket = null
 ) {
   if (!cleanBase64) {
     throw new HttpsError(
@@ -124,7 +450,14 @@ async function analyzeImageWithGemini(
       apiKey
     );
 
-  const model =
+  /*
+   * ================================================================
+   * PASS 1 MODEL — Unconstrained prose + Google Search Grounding.
+   * No responseMimeType or responseSchema so the model's full
+   * search-query generation budget is available (3-8+ queries).
+   * ================================================================
+   */
+  const researchModel =
     genAI.getGenerativeModel({
       model:
         MODEL_NAME,
@@ -139,6 +472,30 @@ async function analyzeImageWithGemini(
       ],
 
       generationConfig: {
+        temperature:
+          0.2,
+
+        maxOutputTokens:
+          8192,
+      },
+    });
+
+  /*
+   * ================================================================
+   * PASS 2 MODEL — Structured JSON synthesis from Pass 1 dossier.
+   * No search tools attached; operates entirely on grounded evidence
+   * collected in Pass 1.
+   * ================================================================
+   */
+  const synthesisModel =
+    genAI.getGenerativeModel({
+      model:
+        MODEL_NAME,
+
+      systemInstruction:
+        SYSTEM_PROMPT,
+
+      generationConfig: {
         responseMimeType:
           "application/json",
 
@@ -146,7 +503,7 @@ async function analyzeImageWithGemini(
           RESPONSE_SCHEMA,
 
         temperature:
-          1.0,
+          0.1,
 
         maxOutputTokens:
           7000,
@@ -166,7 +523,7 @@ async function analyzeImageWithGemini(
 
   const basePrompt =
     prompt ||
-    `Identify the primary solicitation in this image, reconstruct the target and CTA, complete the grounded web crawl, compile the empirical evidence, classify the target, derive all six vectors, identify applicable Action Meter context signals and confirmed Floor Raisers, and return the complete diagnostic report JSON.
+    `Identify the primary solicitation in this image, reconstruct the target and CTA, complete the grounded web crawl, compile the empirical evidence, classify the target, and build a complete factual evidence dossier.
 
 For solicitation recognition, describe the solicitation pattern independently of confirmed actor identity.
 
@@ -177,7 +534,7 @@ Do not treat similar patterns as proof of the same actor.
 Do not generate Deep Dive.`;
 
   const groundedBasePrompt =
-    `${basePrompt}\n${MANDATORY_GROUNDING_INSTRUCTION}`;
+    `${basePrompt}\n${MANDATORY_GROUNDING_INSTRUCTION}\n${RESEARCH_OUTPUT_INSTRUCTION}`;
 
   const promptToExecute =
     buildHistoricalResearchPrompt(
@@ -185,21 +542,21 @@ Do not generate Deep Dive.`;
       historicalEvidencePacket
     );
 
-  const linkBlock = buildLinkEvidenceBlock(linkEvidence);
+  /*
+   * ================================================================
+   * PASS 1 — Grounded research with retry.
+   * Grounding gate enforced here: if both attempts fail verification,
+   * the request is rejected before Pass 2 fires.
+   * ================================================================
+   */
+  const researchAttempts = [];
 
-  const finalPrompt = linkBlock
-
-    ? `${promptToExecute}\n\n${linkBlock}`
-
-    : promptToExecute;
-  const attempts = [];
-
-  async function runAttempt(
+  async function runResearchAttempt(
     requestPrompt,
     attemptNumber
   ) {
     const result =
-      await model.generateContent([
+      await researchModel.generateContent([
         requestPrompt,
         imagePart,
       ]);
@@ -207,88 +564,140 @@ Do not generate Deep Dive.`;
     const telemetry =
       buildAttemptTelemetry(
         result.response,
-        attemptNumber
+        attemptNumber,
+        "research"
       );
 
-    attempts.push(
+    researchAttempts.push(
       telemetry
     );
 
     return result.response;
   }
 
-  let acceptedResponse =
-    await runAttempt(
-      finalPrompt,
+  let researchResponse =
+    await runResearchAttempt(
+      promptToExecute,
       1
     );
 
   if (
-    !attempts[0]
+    !researchAttempts[0]
       .groundingVerification
       .verified
   ) {
-    acceptedResponse =
-      await runAttempt(
-        `${finalPrompt}\n${GROUNDING_RETRY_INSTRUCTION}`,
+    researchResponse =
+      await runResearchAttempt(
+        `${promptToExecute}\n${GROUNDING_RETRY_INSTRUCTION}`,
         2
       );
   }
 
-  const telemetry =
-    aggregateTelemetry(
-      attempts,
-      historicalEvidencePacket,
-      MODEL_NAME
-    );
-
-  const finalVerification =
-    telemetry
-      .groundingVerification;
+  const pass1FinalVerification =
+    researchAttempts[
+      researchAttempts.length - 1
+    ].groundingVerification;
 
   /*
    * Both attempts may consume provider resources.
-   * If grounding still fails, reject before parsing, scoring, persistence,
-   * solicitation history, or Cache Bank admission.
+   * If grounding still fails, reject before Pass 2, parsing, scoring,
+   * persistence, solicitation history, or Cache Bank admission.
    */
-  const hasLinkEvidence =
-    linkEvidence &&
-    linkEvidence.links &&
-    linkEvidence.links.length > 0;
+  if (
+    !pass1FinalVerification
+      .verified
+  ) {
+    const error =
+      new HttpsError(
+        "failed-precondition",
+        "411 could not establish live web grounding after the allowed retry. No diagnostic intelligence was accepted."
+      );
+
+    error.groundingRejected =
+      true;
+
+    error.scanTelemetry =
+      aggregateTelemetry(
+        researchAttempts,
+        historicalEvidencePacket
+      );
+
+    throw error;
+  }
+
+  const researchDossier =
+    researchResponse.text();
 
   /*
-   * T03a — Grounding fallback resilience.
-   * When live web grounding fails and no link evidence exists,
-   * accept the screenshot-bounded response with a disclosure flag
-   * instead of rejecting the entire scan. The user still receives
-   * deterministic intelligence from visible content.
+   * ================================================================
+   * PASS 2 — Schema synthesis from grounded dossier.
+   * Receives the full Pass 1 research text plus the original image.
+   * No search tools: all evidence comes from the dossier.
+   * ================================================================
    */
-  if (
-    !finalVerification
-      .verified &&
-    !hasLinkEvidence
-  ) {
-    telemetry.groundingFailed = true;
-    telemetry.groundingFallbackMode =
-      "screenshot_bounded";
-  }
+  const synthesisPrompt =
+    `Based on the image provided and the grounded research dossier below, compile the complete structured JSON diagnostic report.
 
-  if (
-    !finalVerification
-      .verified &&
-    hasLinkEvidence
-  ) {
-    telemetry.groundingSupplementedByLinkEvidence =
-      true;
-  }
+GROUNDED RESEARCH DOSSIER:
+${researchDossier}
 
-  const rawTextUnsafe = acceptedResponse.text();
-    // Strip markdown fences and dangerous control chars (preserve newlines/tabs)
-    const rawText = rawTextUnsafe
-      .replace(/^```json\s*/i, '')
-      .replace(/^```\s*/i, '')
-      .replace(/\s*```$/, '')
-      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+Instructions:
+- Use the research dossier as your primary evidence source for all claims.
+- Do not invent or hallucinate facts not present in the dossier or visible in the image.
+- If a fact was not established in the dossier, mark the field as not researched, not found, or not applicable as appropriate.
+- Complete all JSON fields according to the response schema.
+- Derive all six risk vectors from the evidence in the dossier.
+- Identify applicable Action Meter context signals and confirmed Floor Raisers.
+- For solicitation recognition, describe the solicitation pattern independently of confirmed actor identity.`;
+
+  const synthesisResult =
+    await synthesisModel
+      .generateContent([
+        synthesisPrompt,
+        imagePart,
+      ]);
+
+  const synthesisResponse =
+    synthesisResult.response;
+
+  const pass2Telemetry =
+    buildAttemptTelemetry(
+      synthesisResponse,
+      researchAttempts.length + 1,
+      "synthesis"
+    );
+
+  /*
+   * ================================================================
+   * TELEMETRY AGGREGATION
+   * All Pass 1 research attempts + Pass 2 synthesis attempt.
+   * Grounding verification overridden to Pass 1's verified result
+   * since Pass 2 has no search tools.
+   * ================================================================
+   */
+  const allAttempts = [
+    ...researchAttempts,
+    pass2Telemetry,
+  ];
+
+  const telemetry =
+    aggregateTelemetry(
+      allAttempts,
+      historicalEvidencePacket
+    );
+
+  telemetry.groundingVerification =
+    pass1FinalVerification;
+
+  /*
+   * ================================================================
+   * REPORT PARSING & EVIDENCE NORMALIZATION
+   * Same pipeline as single-pass: parse JSON, normalize pattern,
+   * bind grounded evidence, score, verdict.
+   * ================================================================
+   */
+  const rawText =
+    synthesisResponse.text();
 
   const parsedData =
     safeParseGeminiJson(
@@ -303,14 +712,13 @@ Do not generate Deep Dive.`;
 
   /*
    * Replace model-proposed Technical 411 source authority with
-   * provider-grounded evidence before scoring or persistence.
+   * provider-grounded evidence from Pass 1 before scoring or
+   * persistence.
    */
   normalizeTechnicalEvidence(
     parsedData,
-    finalVerification
+    pass1FinalVerification.sources
   );
-
-    enforceTechnicalEvidencePrecision(parsedData);
 
   const floorRaisers =
     extractFloorRaisers(
@@ -377,46 +785,6 @@ Do not generate Deep Dive.`;
 
     composition,
   };
-}
-
-/**
- * Build a prompt block from resolved link evidence.
- * Returns null if no links were resolved.
- */
-function buildLinkEvidenceBlock(linkEvidence) {
-  if (
-    !linkEvidence ||
-    !linkEvidence.links ||
-    linkEvidence.links.length === 0
-  ) {
-    return null;
-  }
-
-  const lines = [
-    "DETERMINISTIC LINK EVIDENCE (pre-resolved, not from search):",
-  ];
-
-  linkEvidence.links.forEach((link, i) => {
-    const hopChain = link.hops.length > 0
-      ? link.hops.map((h) => h.to).join(" → ")
-      : "(no redirects)";
-
-    lines.push(
-      `Link ${i + 1}: ${link.submittedUrl}`,
-      `  Redirect chain: ${hopChain}`,
-      `  Final URL: ${link.finalUrl}`,
-      `  Final domain: ${link.finalDomain || "unknown"}`,
-      `  HTTP status: ${link.httpStatus || link.error || "unknown"}`
-    );
-  });
-
-  lines.push(
-    "",
-    "Use this link evidence to investigate the destination",
-    "independently of search grounding results."
-  );
-
-  return lines.join("\n");
 }
 
 module.exports = {
