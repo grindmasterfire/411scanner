@@ -116,7 +116,7 @@ Official sites, phone numbers, emails, registrations, licenses, reviews, complai
 
 4. NEVER GUESS WHEN EVIDENCE IS MISSING.
 
-State that evidence was not found, was not researched, is unresolved, is not applicable, or is insufficient.
+State that evidence was not found, is unresolved, is not applicable, or is insufficient. The status not_researched is never acceptable for an identifiable entity. Every field requires active research before the scan completes.
 
 5. SCORE THE EVIDENCE, NOT MORAL JUDGMENTS ABOUT THE CATEGORY.
 
@@ -1073,13 +1073,27 @@ If registration was not meaningfully investigated, use not_researched.
 
 Apply the same evidence discipline to other licenses, registrations, BBB records, FTC records, government actions, professional credentials, and comparable claims.
 
+MANDATORY RESEARCH SOURCES
+
+For any identifiable entity, the following sources must be actively searched before any regulatory, complaint, or review field is marked not_found:
+- BBB (Better Business Bureau) — search by company name and known location
+- FTC consumer complaint database and enforcement actions
+- State attorney general consumer protection records
+- State financial regulatory agencies (DFPI, DFS, OFR, and equivalents)
+- Trustpilot reviews
+- Google Play Store and Apple App Store review patterns and ratings
+- WHOIS, domain age, and hosting infrastructure records
+- State business registration (Secretary of State filings)
+
+A field may be marked not_found ONLY after the relevant source was actively searched and returned no result. The status not_researched is never acceptable for any of these sources when the entity is identifiable.
+
 Do not write a confident legacy display sentence that contradicts the structured evidence receipt.
 
 If the receipt is unresolved, the display field must remain unresolved.
 
 If the receipt is not_found, the display field must state only what was actually not found.
 
-If the receipt is not_researched, do not imply that no record exists.
+If the receipt is not_researched, do not imply that no record exists. The status not_researched is only acceptable when the entity is completely unidentifiable. For any named or searchable entity, active research is mandatory before the scan completes.
 
 COMPLAINTS AND REVIEW PATTERNS
 
@@ -1094,7 +1108,6 @@ Distinguish:
 - Mixed complaint pattern
 - Recurring corroborated complaint pattern
 - Identity unresolved
-- Not researched
 
 Do not turn a small search sample into an absolute universal claim.
 
