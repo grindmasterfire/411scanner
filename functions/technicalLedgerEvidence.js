@@ -1,50 +1,45 @@
 /**
  * @file functions/technicalLedgerEvidence.js
- * @class Class 2
- * @cap 250 Lines
- * @responsibility Normalize Technical 411 evidence receipts against provider-grounded web sources and prevent unsupported verified claims.
- * @dependencies None.
+ * @class Class 2 (grounding-source resolution — cap-exempt)
+ * @responsibility Normalize Technical 411 evidence receipts against provider-grounded web sources, resolve provider grounding redirects to real inspectable destinations, and prevent unsupported verified claims.
+ * @dependencies fetch (Node 18+) for grounding-redirect resolution; ./groundingEvidenceBinding.
  * @security_gate A model claim cannot become verified merely because Gemini wrote a URL or confident sentence.
  * @owner_context 411 Scanner Technical 411 evidence authority.
  *
- * Canonical receipt states:
- * - verified: inspectable provider-grounded evidence establishes the claim.
- * - not_found: the relevant authority/source was researched and no record was found.
- * - not_applicable: the field does not apply to this target.
- * - unresolved: research occurred but evidence could not establish the claim.
- * - not_researched: the current grounded investigation did not establish the field.
+ * Canonical receipt states: verified, not_found, not_applicable, unresolved, not_researched.
  *
- * Regulatory claims receive the strictest treatment. "SEC certified" is
- * never accepted terminology. SEC registration requires an identified
- * subject, usable record identifier, and provider-grounded authority source.
+ * Provider grounding metadata returns opaque vertexaisearch redirect URLs.
+ * Those are resolved to real destinations so (a) receipts can match the domains
+ * actually grounded on, and (b) Inspect Source shows durable, cache-safe links
+ * instead of expiring redirect wrappers. Resolution is best-effort: an
+ * unresolved redirect is retained rather than dropping the grounding.
+ *
+ * A non-verified receipt is never allowed to read as an established fact.
  */
 
 const {
   bindTechnicalEvidenceSources,
 } = require("./groundingEvidenceBinding");
 
-const VALID_STATUSES =
-  new Set([
-    "verified",
-    "not_found",
-    "not_applicable",
-    "unresolved",
-    "not_researched",
-  ]);
+const VALID_STATUSES = new Set([
+  "verified",
+  "not_found",
+  "not_applicable",
+  "unresolved",
+  "not_researched",
+]);
+
+const GROUNDING_REDIRECT_HOST = "vertexaisearch.cloud.google.com";
+const GROUNDING_REDIRECT_PATH = "/grounding-api-redirect/";
+const REDIRECT_RESOLVE_TIMEOUT_MS = 5000;
 
 function clean(value) {
-  return typeof value === "string"
-    ? value.trim()
-    : "";
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function normalizeUrl(value) {
   const url = clean(value);
-
-  if (!url) {
-    return "";
-  }
-
+  if (!url) return "";
   try {
     return new URL(url).toString();
   } catch (error) {
@@ -52,73 +47,34 @@ function normalizeUrl(value) {
   }
 }
 
-function comparableSourceKey(value) {
-  const normalized =
-    normalizeUrl(value);
-
-  if (!normalized) {
+function hostOf(value) {
+  const normalized = normalizeUrl(value);
+  if (!normalized) return "";
+  try {
+    return new URL(normalized).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
     return "";
   }
+}
 
+function comparableSourceKey(value) {
+  const normalized = normalizeUrl(value);
+  if (!normalized) return "";
   try {
-    const parsed =
-      new URL(normalized);
-
-    const host =
-      parsed.hostname
-        .toLowerCase()
-        .replace(/^www\./, "");
-
-    const port =
-      parsed.port
-        ? `:${parsed.port}`
-        : "";
-
-    const path =
-      parsed.pathname
-        .replace(/\/+$/, "") || "/";
-
-    const ignoredParams =
-      new Set([
-        "fbclid",
-        "gclid",
-        "igshid",
-        "mc_cid",
-        "mc_eid",
-      ]);
-
+    const parsed = new URL(normalized);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    const port = parsed.port ? `:${parsed.port}` : "";
+    const path = parsed.pathname.replace(/\/+$/, "") || "/";
+    const ignoredParams = new Set(["fbclid", "gclid", "igshid", "mc_cid", "mc_eid"]);
     const params = [];
-
-    for (
-      const [key, itemValue]
-      of parsed.searchParams.entries()
-    ) {
-      if (
-        key.toLowerCase().startsWith("utm_") ||
-        ignoredParams.has(key.toLowerCase())
-      ) {
-        continue;
-      }
-
-      params.push(
-        `${key}=${itemValue}`
-      );
+    for (const [key, itemValue] of parsed.searchParams.entries()) {
+      if (key.toLowerCase().startsWith("utm_") || ignoredParams.has(key.toLowerCase())) continue;
+      params.push(`${key}=${itemValue}`);
     }
-
     params.sort();
-
-    return (
-      `${host}${port}${path}` +
-      (
-        params.length
-          ? `?${params.join("&")}`
-          : ""
-      )
-    );
+    return `${host}${port}${path}` + (params.length ? `?${params.join("&")}` : "");
   } catch {
-    return normalized
-      .toLowerCase()
-      .replace(/\/+$/, "");
+    return normalized.toLowerCase().replace(/\/+$/, "");
   }
 }
 
@@ -135,259 +91,224 @@ function groundedUrlAliases(source) {
   ];
 }
 
+function isGroundingRedirect(value) {
+  const normalized = normalizeUrl(value);
+  if (!normalized) return false;
+  try {
+    const parsed = new URL(normalized);
+    return (
+      parsed.hostname.toLowerCase() === GROUNDING_REDIRECT_HOST &&
+      parsed.pathname.toLowerCase().startsWith(GROUNDING_REDIRECT_PATH)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Any http(s) URL is a usable grounded source. Redirect wrappers are resolved
+ * to real destinations earlier; a redirect that could not be resolved is still
+ * retained rather than dropping the grounding entirely.
+ */
 function isUsableGroundedSourceUrl(value) {
-  const normalized =
-    normalizeUrl(value);
-
-  if (!normalized) {
-    return false;
-  }
-
-  const parsed =
-    new URL(normalized);
-
-  if (
-    parsed.protocol !== "https:" &&
-    parsed.protocol !== "http:"
-  ) {
-    return false;
-  }
-
-  return !(
-    parsed.hostname.toLowerCase() ===
-      "vertexaisearch.cloud.google.com" &&
-    parsed.pathname
-      .toLowerCase()
-      .startsWith(
-        "/grounding-api-redirect/"
-      )
-  );
+  const normalized = normalizeUrl(value);
+  if (!normalized) return false;
+  const parsed = new URL(normalized);
+  return parsed.protocol === "https:" || parsed.protocol === "http:";
 }
 
 function preferredGroundedSourceUrl(source) {
+  for (const candidate of groundedUrlAliases(source)) {
+    if (isUsableGroundedSourceUrl(candidate) && !isGroundingRedirect(candidate)) {
+      return normalizeUrl(candidate);
+    }
+  }
   for (const candidate of groundedUrlAliases(source)) {
     if (isUsableGroundedSourceUrl(candidate)) {
       return normalizeUrl(candidate);
     }
   }
-
   return "";
 }
 
-function buildGroundedSourceMap(
-  groundedSources = []
-) {
-  const map = new Map();
-
-  for (const source of groundedSources) {
-    const uri =
-      preferredGroundedSourceUrl(source);
-
-    if (!uri) {
-      continue;
-    }
-
-    const groundedSource = {
-      uri,
-      title:
-        clean(source?.title),
-    };
-
-    for (
-      const alias
-      of groundedUrlAliases(source)
-    ) {
-      const normalized =
-        normalizeUrl(alias);
-
-      if (!normalized) {
-        continue;
+/**
+ * Resolve one provider grounding redirect to its real destination.
+ * Best-effort, timeout-bounded. Empty string means "could not resolve".
+ */
+async function resolveOneRedirect(redirectUrl) {
+  const attempt = async (mode) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REDIRECT_RESOLVE_TIMEOUT_MS);
+    try {
+      const res = await fetch(redirectUrl, {
+        method: "GET",
+        redirect: mode,
+        signal: controller.signal,
+        headers: { "User-Agent": "411Scanner/1.0 (grounding-source-resolver)" },
+      });
+      if (mode === "manual") {
+        const loc = res.headers.get("location");
+        if (loc) {
+          const abs = new URL(loc, redirectUrl).toString();
+          if (isUsableGroundedSourceUrl(abs) && !isGroundingRedirect(abs)) return abs;
+        }
+        return "";
       }
-
-      map.set(
-        normalized,
-        groundedSource
-      );
-
-      const comparable =
-        comparableSourceKey(alias);
-
-      if (comparable) {
-        map.set(
-          `canonical:${comparable}`,
-          groundedSource
-        );
+      if (res && res.url && isUsableGroundedSourceUrl(res.url) && !isGroundingRedirect(res.url)) {
+        return res.url;
       }
+      return "";
+    } catch (_) {
+      return "";
+    } finally {
+      clearTimeout(timer);
     }
-  }
-
-  return map;
+  };
+  const viaHeader = await attempt("manual");
+  if (viaHeader) return viaHeader;
+  return attempt("follow");
 }
 
-function findGroundedSource(
-  requestedUrl,
-  groundedSourceMap
-) {
-  const normalized =
-    normalizeUrl(requestedUrl);
-
-  if (!normalized) {
-    return null;
-  }
-
-  const exact =
-    groundedSourceMap.get(normalized);
-
-  if (exact) {
-    return exact;
-  }
-
-  const comparable =
-    comparableSourceKey(normalized);
-
-  if (!comparable) {
-    return null;
-  }
-
-  return (
-    groundedSourceMap.get(
-      `canonical:${comparable}`
-    ) || null
+async function resolveGroundedSources(groundedSources) {
+  return Promise.all(
+    (Array.isArray(groundedSources) ? groundedSources : []).map(async (source) => {
+      const redirectUri = groundedUrlAliases(source).map(normalizeUrl).find(isGroundingRedirect);
+      if (!redirectUri) return source;
+      const resolved = await resolveOneRedirect(redirectUri);
+      if (!resolved) return source;
+      return { ...source, uri: resolved, resolvedUri: resolved };
+    })
   );
 }
 
+function buildGroundedSourceMap(groundedSources = []) {
+  const map = new Map();
+  for (const source of groundedSources) {
+    const uri = preferredGroundedSourceUrl(source);
+    if (!uri) continue;
+    const groundedSource = { uri, title: clean(source?.title) };
+    for (const alias of groundedUrlAliases(source)) {
+      const normalized = normalizeUrl(alias);
+      if (!normalized) continue;
+      map.set(normalized, groundedSource);
+      const comparable = comparableSourceKey(alias);
+      if (comparable) map.set(`canonical:${comparable}`, groundedSource);
+      const host = hostOf(alias);
+      if (host && !isGroundingRedirect(alias) && !map.has(`host:${host}`)) {
+        map.set(`host:${host}`, groundedSource);
+      }
+    }
+  }
+  return map;
+}
+
+function findGroundedSource(requestedUrl, groundedSourceMap) {
+  const normalized = normalizeUrl(requestedUrl);
+  if (!normalized) return null;
+  const exact = groundedSourceMap.get(normalized);
+  if (exact) return exact;
+  const comparable = comparableSourceKey(normalized);
+  if (comparable) {
+    const byCanonical = groundedSourceMap.get(`canonical:${comparable}`);
+    if (byCanonical) return byCanonical;
+  }
+  const host = hostOf(normalized);
+  if (host) {
+    const byHost = groundedSourceMap.get(`host:${host}`);
+    if (byHost) return byHost;
+  }
+  return null;
+}
+
 function isSecAuthority(receipt) {
-  const authority =
-    clean(receipt?.authority)
-      .toLowerCase();
-
-  const sourceUrl =
-    normalizeUrl(
-      receipt?.source_url
-    ).toLowerCase();
-
+  const authority = clean(receipt?.authority).toLowerCase();
+  const sourceUrl = normalizeUrl(receipt?.source_url).toLowerCase();
   return (
-    authority.includes(
-      "securities and exchange commission"
-    ) ||
+    authority.includes("securities and exchange commission") ||
     authority === "sec" ||
     sourceUrl.includes("sec.gov") ||
-    sourceUrl.includes(
-      "adviserinfo.sec.gov"
-    )
+    sourceUrl.includes("adviserinfo.sec.gov")
   );
 }
 
 function isSecRegistrationClaim(receipt) {
-  const field =
-    clean(receipt?.field)
-      .toLowerCase();
-
-  const finding =
-    clean(receipt?.finding)
-      .toLowerCase();
-
+  const field = clean(receipt?.field).toLowerCase();
+  const finding = clean(receipt?.finding).toLowerCase();
   return (
     field.includes("sec") ||
     finding.includes("sec registered") ||
-    finding.includes(
-      "sec-registered"
-    ) ||
-    finding.includes(
-      "registered investment adviser"
-    )
+    finding.includes("sec-registered") ||
+    finding.includes("registered investment adviser")
   );
 }
 
 /**
- * One receipt is allowed to remain verified only when its source URL
- * exists in provider grounding metadata.
- *
- * SEC registration additionally requires an exact subject and record
- * identifier so 411 can distinguish a real filing from name similarity.
+ * A non-verified receipt must never read as an established fact.
+ * unresolved / not_researched findings are prefixed so the body matches the badge.
  */
-function normalizeEvidenceReceipt(
-  receipt,
-  groundedSourceMap
-) {
-  const requestedStatus =
-    VALID_STATUSES.has(
-      clean(receipt?.status)
-    )
-      ? clean(receipt.status)
-      : "unresolved";
+function conformFindingToStatus(status, finding) {
+  const f = clean(finding);
+  if (!f) return f;
+  const lower = f.toLowerCase();
+  if (status === "unresolved") {
+    if (
+      lower.startsWith("unverified") ||
+      lower.startsWith("unresolved") ||
+      lower.startsWith("could not") ||
+      lower.startsWith("identity could not")
+    ) {
+      return f;
+    }
+    return `Unverified (live grounding did not confirm this): ${f}`;
+  }
+  if (status === "not_researched") {
+    if (lower.startsWith("not researched")) return f;
+    return `Not researched this scan: ${f}`;
+  }
+  return f;
+}
 
-  const sourceUrl =
-    normalizeUrl(
-      receipt?.source_url
-    );
-
-  const groundedSource =
-    findGroundedSource(
-      sourceUrl,
-      groundedSourceMap
-    );
+function normalizeEvidenceReceipt(receipt, groundedSourceMap) {
+  const requestedStatus = VALID_STATUSES.has(clean(receipt?.status))
+    ? clean(receipt.status)
+    : "unresolved";
+  const sourceUrl = normalizeUrl(receipt?.source_url);
+  const groundedSource = findGroundedSource(sourceUrl, groundedSourceMap);
 
   const normalized = {
-    field:
-      clean(receipt?.field),
-
-    status:
-      requestedStatus,
-
-    finding:
-      clean(receipt?.finding),
-
-    authority:
-      clean(receipt?.authority),
-
-    subject:
-      clean(receipt?.subject),
-
-    identifier:
-      clean(receipt?.identifier),
-
-    source_url:
-      groundedSource?.uri || "",
-
-    source_title:
-      groundedSource?.title || "",
+    field: clean(receipt?.field),
+    status: requestedStatus,
+    finding: clean(receipt?.finding),
+    authority: clean(receipt?.authority),
+    subject: clean(receipt?.subject),
+    identifier: clean(receipt?.identifier),
+    source_url: groundedSource?.uri || "",
+    source_title: groundedSource?.title || "",
   };
 
-  if (
-    normalized.status === "verified" &&
-    !groundedSource
-  ) {
-    normalized.status =
-      "unresolved";
+  if (normalized.status === "verified" && !groundedSource) {
+    normalized.status = "unresolved";
   }
 
   if (
     normalized.status === "verified" &&
     isSecRegistrationClaim(normalized) &&
-    (
-      !isSecAuthority(normalized) ||
-      !normalized.subject ||
-      !normalized.identifier
-    )
+    (!isSecAuthority(normalized) || !normalized.subject || !normalized.identifier)
   ) {
-    normalized.status =
-      "unresolved";
+    normalized.status = "unresolved";
+  }
+
+  if (normalized.finding.toLowerCase().includes("sec certified")) {
+    normalized.status = "unresolved";
+    normalized.finding = normalized.finding.replace(/sec certified/gi, "SEC registration not established");
   }
 
   if (
-    normalized.finding
-      .toLowerCase()
-      .includes("sec certified")
+    normalized.status !== "verified" &&
+    normalized.status !== "not_applicable" &&
+    normalized.status !== "not_found"
   ) {
-    normalized.status =
-      "unresolved";
-
-    normalized.finding =
-      normalized.finding.replace(
-        /sec certified/gi,
-        "SEC registration not established"
-      );
+    normalized.finding = conformFindingToStatus(normalized.status, normalized.finding);
   }
 
   return normalized;
@@ -395,79 +316,37 @@ function normalizeEvidenceReceipt(
 
 /**
  * Normalize all model-proposed Technical 411 evidence receipts.
- *
- * Provider-grounded sources are the authority boundary. Search terms and
- * raw grounding metadata are never copied into the report.
+ * Provider-grounded sources (with redirects resolved to real URLs) are the
+ * authority boundary. Async because redirect resolution performs network I/O.
  */
-function normalizeTechnicalEvidence(
-  report,
-  groundingInput = []
-) {
-  const groundedSources =
-    Array.isArray(groundingInput)
-      ? groundingInput
-      : Array.isArray(
-          groundingInput?.sources
-        )
-        ? groundingInput.sources
-        : [];
+async function normalizeTechnicalEvidence(report, groundingInput = []) {
+  const rawSources = Array.isArray(groundingInput)
+    ? groundingInput
+    : Array.isArray(groundingInput?.sources)
+      ? groundingInput.sources
+      : [];
 
   const groundedSupports =
-    !Array.isArray(groundingInput) &&
-    Array.isArray(
-      groundingInput?.supports
-    )
+    !Array.isArray(groundingInput) && Array.isArray(groundingInput?.supports)
       ? groundingInput.supports
       : [];
 
-  bindTechnicalEvidenceSources(
-    report,
-    groundedSources,
-    groundedSupports
+  const groundedSources = await resolveGroundedSources(rawSources);
+
+  bindTechnicalEvidenceSources(report, groundedSources, groundedSupports);
+  const ledger = report?.technical_ledger;
+  if (!ledger) return report;
+
+  const sourceMap = buildGroundedSourceMap(groundedSources);
+  const proposedReceipts = Array.isArray(ledger.evidence_receipts) ? ledger.evidence_receipts : [];
+  ledger.evidence_receipts = proposedReceipts.map((receipt) =>
+    normalizeEvidenceReceipt(receipt, sourceMap)
   );
-  const ledger =
-    report?.technical_ledger;
 
-  if (!ledger) {
-    return report;
-  }
-
-  const sourceMap =
-    buildGroundedSourceMap(
-      groundedSources
-    );
-
-  const proposedReceipts =
-    Array.isArray(
-      ledger.evidence_receipts
-    )
-      ? ledger.evidence_receipts
-      : [];
-
-  ledger.evidence_receipts =
-    proposedReceipts.map(
-      (receipt) =>
-        normalizeEvidenceReceipt(
-          receipt,
-          sourceMap
-        )
-    );
-
-  ledger.network_telemetry =
-    ledger.network_telemetry || {};
-
-  /*
-   * Legacy Android currently expects grounding_sources as strings.
-   * The server replaces model output with provider-proven destinations.
-   */
-  ledger.network_telemetry
-    .grounding_sources =
-      groundedSources
-        .map(
-          (source) =>
-            preferredGroundedSourceUrl(source)
-        )
-        .filter(Boolean);
+  ledger.network_telemetry = ledger.network_telemetry || {};
+  ledger.network_telemetry.grounding_sources = groundedSources
+    .map((source) => preferredGroundedSourceUrl(source))
+    .filter(Boolean);
 
   return report;
 }

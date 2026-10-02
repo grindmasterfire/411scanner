@@ -186,6 +186,15 @@ function buildBusinessSummary(receipts = []) {
   const groundingRejectedRequests =
     modes.grounding_rejected;
 
+  const rejectCauses =
+    receipts.reduce((acc, r) => {
+      if (r && r.mode === "grounding_rejected") {
+        const cause = r.groundingCause || "unknown";
+        acc[cause] = (acc[cause] || 0) + 1;
+      }
+      return acc;
+    }, {});
+
   /*
    * Rejected provider attempts are real requests and real expenses, but
    * they produced no resolved intelligence. Cache efficiency therefore
@@ -205,6 +214,7 @@ function buildBusinessSummary(receipts = []) {
     freshRequests,
 
     groundingRejectedRequests,
+    rejectCauses,
 
     cacheHits,
 

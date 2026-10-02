@@ -56,7 +56,7 @@ function serverTimestamp() {
 exports.scan = onCall(
   {
     region: "us-central1",
-    timeoutSeconds: 120,
+    timeoutSeconds: 300,
     memory: "1GiB",
   },
   async (request) =>

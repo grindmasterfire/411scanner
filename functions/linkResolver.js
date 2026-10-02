@@ -1,35 +1,33 @@
 /**
  * @file functions/linkResolver.js
  * @class Class 2
- * @cap 250 Lines
- * @responsibility Extract action links from OCR text and
- *   resolve them deterministically through redirect chains.
+ * @cap 300 Lines
+ * @responsibility Extract action links from OCR text (full URLs, known
+ *   shorteners, and bare domains/paths) and resolve them deterministically
+ *   through redirect chains.
  * @dependencies Node native fetch (Node 18+).
- * @security_gate Read-only link following. No persistence,
- *   no identity mutation, no scoring, no cache writes.
- *   Timeout-bounded. Never follows more than 10 hops.
+ * @security_gate Read-only link following. No persistence, no identity
+ *   mutation, no scoring, no cache writes. Timeout-bounded. Never follows
+ *   more than 10 hops.
  */
 
 const MAX_HOPS = 10;
 const FETCH_TIMEOUT_MS = 8000;
 const MAX_PARALLEL = 5;
+const MAX_BARE = 5;
 
 const SHORTENER_HOSTS = new Set([
-  "bit.ly",
-  "t.co",
-  "tinyurl.com",
-  "goo.gl",
-  "ow.ly",
-  "is.gd",
-  "buff.ly",
-  "adf.ly",
-  "bl.ink",
-  "lnkd.in",
-  "db.tt",
-  "qr.ae",
-  "cutt.ly",
-  "rb.gy",
+  "bit.ly", "t.co", "tinyurl.com", "goo.gl", "ow.ly", "is.gd", "buff.ly",
+  "adf.ly", "bl.ink", "lnkd.in", "db.tt", "qr.ae", "cutt.ly", "rb.gy",
   "shorturl.at",
+]);
+
+const COMMON_TLDS = new Set([
+  "com", "net", "org", "io", "co", "app", "xyz", "info", "biz", "us", "uk",
+  "ca", "de", "fr", "au", "online", "site", "club", "shop", "store", "live",
+  "news", "media", "money", "vip", "top", "pro", "dev", "ai", "gg", "cc",
+  "tv", "me", "link", "click", "fun", "life", "world", "today", "icu",
+  "cyou", "sbs", "finance", "capital", "fund", "cash",
 ]);
 
 function extractActionLinks(ocrText) {
@@ -40,15 +38,11 @@ function extractActionLinks(ocrText) {
   const seen = new Set();
   const results = [];
 
-  const fullUrlPattern =
-    /https?:\/\/[^\s<>"')\]},;]+/gi;
-
+  const fullUrlPattern = /https?:\/\/[^\s<>"')\]},;]+/gi;
   const fullMatches = ocrText.match(fullUrlPattern) || [];
-
   for (const url of fullMatches) {
     const cleaned = url.replace(/[.,;:!?)]+$/, "");
     const lower = cleaned.toLowerCase();
-
     if (!seen.has(lower)) {
       seen.add(lower);
       results.push(cleaned);
@@ -57,24 +51,46 @@ function extractActionLinks(ocrText) {
 
   const bareShortenerPattern =
     /\b([a-z0-9-]+\.[a-z]{2,})\/[^\s<>"')\]},;]+/gi;
-
   let match;
-
-  while (
-    (match = bareShortenerPattern.exec(ocrText)) !== null
-  ) {
+  while ((match = bareShortenerPattern.exec(ocrText)) !== null) {
     const domain = match[1].toLowerCase();
-
     if (SHORTENER_HOSTS.has(domain)) {
       const withProtocol = `https://${match[0]}`;
-      const cleaned =
-        withProtocol.replace(/[.,;:!?)]+$/, "");
+      const cleaned = withProtocol.replace(/[.,;:!?)]+$/, "");
       const lower = cleaned.toLowerCase();
-
       if (!seen.has(lower)) {
         seen.add(lower);
         results.push(cleaned);
       }
+    }
+  }
+
+  /*
+   * Bare-domain pass. Mobile browser bars and OCR routinely capture a domain
+   * with no protocol (e.g. "ibocore.com/lp/advertori"). Match those, validate
+   * the TLD against a common set to avoid probing prose like "income.The",
+   * cap the count, and normalize to https://.
+   */
+  const bareDomainPattern =
+    /\b((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+([a-z]{2,24}))(\/[^\s<>"')\]},;]*)?/gi;
+  let bm;
+  let bareCount = 0;
+  while (
+    (bm = bareDomainPattern.exec(ocrText)) !== null &&
+    bareCount < MAX_BARE
+  ) {
+    const host = bm[1].toLowerCase();
+    const tld = bm[2].toLowerCase();
+    if (!COMMON_TLDS.has(tld)) {
+      continue;
+    }
+    const withProtocol = `https://${host}${bm[3] || ""}`;
+    const cleaned = withProtocol.replace(/[.,;:!?)]+$/, "");
+    const lower = cleaned.toLowerCase();
+    if (!seen.has(lower)) {
+      seen.add(lower);
+      results.push(cleaned);
+      bareCount++;
     }
   }
 
@@ -97,47 +113,27 @@ async function resolveLink(url) {
   try {
     for (let i = 0; i < MAX_HOPS; i++) {
       const controller = new AbortController();
-      const timeout = setTimeout(
-        () => controller.abort(),
-        FETCH_TIMEOUT_MS
-      );
+      const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
       let response;
-
       try {
         response = await fetch(current, {
           method: "GET",
           redirect: "manual",
           signal: controller.signal,
-          headers: {
-            "User-Agent":
-              "411Scanner/1.0 (link-resolver)",
-          },
+          headers: { "User-Agent": "411Scanner/1.0 (link-resolver)" },
         });
       } finally {
         clearTimeout(timeout);
       }
 
       const status = response.status;
-
-      if (
-        status >= 300 &&
-        status < 400 &&
-        response.headers.has("location")
-      ) {
-        const location =
-          response.headers.get("location");
-
+      if (status >= 300 && status < 400 && response.headers.has("location")) {
+        const location = response.headers.get("location");
         const next = location.startsWith("http")
           ? location
           : new URL(location, current).href;
-
-        evidence.hops.push({
-          from: current,
-          to: next,
-          status,
-        });
-
+        evidence.hops.push({ from: current, to: next, status });
         current = next;
         continue;
       }
@@ -151,11 +147,7 @@ async function resolveLink(url) {
     evidence.finalDomain = parsed.hostname;
     evidence.finalPath = parsed.pathname;
   } catch (err) {
-    evidence.error =
-      err.name === "AbortError"
-        ? "timeout"
-        : err.message;
-
+    evidence.error = err.name === "AbortError" ? "timeout" : err.message;
     try {
       const parsed = new URL(current);
       evidence.finalDomain = parsed.hostname;
@@ -163,7 +155,6 @@ async function resolveLink(url) {
     } catch (_) {
       /* URL unparseable — leave null */
     }
-
     evidence.finalUrl = current;
   }
 
@@ -172,25 +163,15 @@ async function resolveLink(url) {
 
 async function resolveAllLinks(ocrText) {
   const urls = extractActionLinks(ocrText);
-
   if (urls.length === 0) {
     return { links: [], resolvedAt: null };
   }
-
   const batch = urls.slice(0, MAX_PARALLEL);
-
-  const settled = await Promise.allSettled(
-    batch.map((url) => resolveLink(url))
-  );
-
+  const settled = await Promise.allSettled(batch.map((url) => resolveLink(url)));
   const links = settled
     .filter((s) => s.status === "fulfilled")
     .map((s) => s.value);
-
-  return {
-    links,
-    resolvedAt: new Date().toISOString(),
-  };
+  return { links, resolvedAt: new Date().toISOString() };
 }
 
 module.exports = {

@@ -44,6 +44,10 @@ const { getHistoricalResearchContext } =
 const { analyzeImageWithGemini } = require("./geminiEngine");
 const { persistFreshScanResult } = require("./scanResultPersistence");
 const { resolveAllLinks } = require("./linkResolver");
+const {
+  runNetworkProbe,
+  applyMeasuredLedger,
+} = require("./networkProbe");
 
 const {
   createScanRequestId,
@@ -247,6 +251,9 @@ async function executeScan(
   const linkEvidence =
     await resolveAllLinks(ocrText);
 
+  const probe =
+    await runNetworkProbe(linkEvidence);
+
   const apiKey =
     process.env.GEMINI_API_KEY ||
     process.env.GOOGLE_GEMINI_API_KEY;
@@ -273,7 +280,8 @@ async function executeScan(
         mimeType,
         prompt,
         historicalContext.evidencePacket,
-        linkEvidence
+        linkEvidence,
+        probe
       );
   } catch (error) {
     if (
@@ -288,6 +296,8 @@ async function executeScan(
           cacheKey,
           telemetry:
             error.scanTelemetry,
+          groundingCause:
+            error.groundingCause,
         }
       );
     }
@@ -310,7 +320,7 @@ async function executeScan(
       msg.includes("etimedout") ||
       msg.includes("socket hang up");
 
-    if (isProviderFailure) {
+    if (isProviderFailure || error?.groundingRejected) {
       throw new HttpsError(
         "unavailable",
         "The analysis provider is temporarily " +
@@ -330,7 +340,32 @@ async function executeScan(
     createScanInvestigationId();
 
   const report = result.report;
+
   const telemetry = result.telemetry;
+
+  // Server-owned infrastructure measurement (governance write).
+  applyMeasuredLedger(report, probe);
+  let probeStatus = probe && probe.measured ? "measured" : "bypassed_no_target";
+
+  // Fallback: OCR gave no URL, but the model identified a domain. Probe that
+  // domain and re-apply so the Technical 411 fills whenever a domain is known.
+  if (!probe || !probe.measured) {
+    const tl = report.technical_ledger || {};
+    const candidate =
+      (tl.network_telemetry && tl.network_telemetry.app_package_or_domain) ||
+      (tl.attribution && tl.attribution.official_domain) ||
+      (report.solicitation_identity &&
+        report.solicitation_identity.destination_domain) ||
+      "";
+    if (candidate && String(candidate).includes(".")) {
+      const fallbackProbe = await runNetworkProbe(null, candidate);
+      if (fallbackProbe && fallbackProbe.measured) {
+        applyMeasuredLedger(report, fallbackProbe);
+        probeStatus = "fallback_measured";
+      }
+    }
+  }
+  telemetry.probe_status = probeStatus;
   const composition =
     result.composition || null;
 

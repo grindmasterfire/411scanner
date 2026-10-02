@@ -136,6 +136,7 @@ async function recordGroundingRejectedAccounting(
     requestId,
     cacheKey,
     telemetry,
+    groundingCause,
   }
 ) {
   const receipt =
@@ -145,6 +146,8 @@ async function recordGroundingRejectedAccounting(
       mode:
         "grounding_rejected",
       telemetry,
+      groundingCause:
+        groundingCause || "unknown",
     });
 
   await createScanReceipt(

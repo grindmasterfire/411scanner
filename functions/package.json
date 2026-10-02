@@ -16,6 +16,7 @@
     "business:last": "node scripts/business-center.js last",
     "business:today": "node scripts/business-center.js today",
     "business:week": "node scripts/business-center.js week",
-    "business:month": "node scripts/business-center.js month"
+    "business:month": "node scripts/business-center.js month",
+    "business:health": "node scripts/health.js"
   }
 }

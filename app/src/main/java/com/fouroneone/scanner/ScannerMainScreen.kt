@@ -187,11 +187,9 @@ fun ScannerMainScreen(
                     scanResult = null
                     refreshRecentScans()
                 },
-                onRequestDeepDive = {
-                    ScanRepository.deepDive(
-                        parsedReport
-                    )
-                }
+                // Deep Dive removed from V1 initial scan (canon). Endpoint deleted;
+                // wiring nulled so the button does not render. Code retained for post-V1 Pro.
+                onRequestDeepDive = null
             )
             return
         }

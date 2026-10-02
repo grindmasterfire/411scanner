@@ -79,8 +79,14 @@ const {
   measureScanComposition,
 } = require("./scanCompositionMeter");
 
-const MODEL_NAME =
-  "gemini-3.6-flash";
+const { probeContextBlock } = require("./networkProbe");
+
+const PASS1_MODEL =
+  process.env.PASS1_MODEL || "gemini-3.1-pro-preview";
+const PASS2_MODEL =
+  process.env.PASS2_MODEL || "gemini-3.8-flash";
+const MODEL_NAME = PASS1_MODEL;
+const MAX_GROUNDING_RETRIES = Number(process.env.MAX_GROUNDING_RETRIES) || 5;
 
 const MANDATORY_GROUNDING_INSTRUCTION = `
 MANDATORY 411 GROUNDING REQUIREMENT:
@@ -133,7 +139,7 @@ Cover every evidence category relevant to the six diagnostic vectors:
 If a source yields no results, state that explicitly rather than omitting it.
 
 MANDATORY ALTERNATIVES DISCOVERY (ACTION METER 5.6+):
-If the target shows significant risk factors suggesting an Action Meter score of 5.6 or above (crypto participation, predatory mechanics, high financial risk, deceptive practices, aggressive data collection, ad-farm patterns, or phantom balance schemes), you MUST actively search for 2 to 3 legitimate alternatives in the same category.
+If the target shows significant risk factors suggesting an Action Meter score of 5.6 or above (crypto participation, predatory mechanics, high financial risk, deceptive practices, aggressive data collection, ad-farm patterns, or phantom balance schemes), you MUST actively search for 3 to 5 legitimate alternatives in the same category, spanning comparable, complementary, and adjacent options.
 
 For each alternative found, include:
 - The real name of the alternative
@@ -442,7 +448,8 @@ async function analyzeImageWithGemini(
   mimeType,
   prompt,
   historicalEvidencePacket = null,
-  linkEvidence = null
+  linkEvidence = null,
+  probe = null
 ) {
   if (!cleanBase64) {
     throw new HttpsError(
@@ -503,7 +510,7 @@ async function analyzeImageWithGemini(
   const synthesisModel =
     genAI.getGenerativeModel({
       model:
-        MODEL_NAME,
+        PASS2_MODEL,
 
       systemInstruction:
         SYSTEM_PROMPT,
@@ -590,7 +597,7 @@ Do not generate Deep Dive.`;
 
   const promptToExecute =
     buildHistoricalResearchPrompt(
-      groundedBasePrompt,
+      groundedBasePrompt + probeContextBlock(probe),
       historicalEvidencePacket
     );
 
@@ -633,15 +640,17 @@ Do not generate Deep Dive.`;
       1
     );
 
-  if (
-    !researchAttempts[0]
+  while (
+    !researchAttempts[researchAttempts.length - 1]
       .groundingVerification
-      .verified
+      .verified &&
+    researchAttempts.length < MAX_GROUNDING_RETRIES
   ) {
+    await new Promise((r) => setTimeout(r, 600 * researchAttempts.length));
     researchResponse =
       await runResearchAttempt(
         `${promptToExecute}\n${GROUNDING_RETRY_INSTRUCTION}`,
-        2
+        researchAttempts.length + 1
       );
   }
 
@@ -667,6 +676,12 @@ Do not generate Deep Dive.`;
 
     error.groundingRejected =
       true;
+
+    const finalV = pass1FinalVerification || {};
+    const q = Number(finalV.webSearchQueries) || 0;
+    const c = Number(finalV.groundingChunks) || 0;
+    error.groundingCause =
+      q === 0 ? "model_refused" : (c === 0 ? "blink" : "unknown");
 
     error.scanTelemetry =
       aggregateTelemetry(
@@ -701,6 +716,9 @@ Instructions:
 - Derive all six risk vectors from the evidence in the dossier.
 - Identify applicable Action Meter context signals and confirmed Floor Raisers.
 - Populate alternatives.discovery_items using only real alternatives found in the research dossier. Each entry needs a real name, a real destination_url from the dossier, a relationship type (comparative, complementary, or adjacent), and a one-line description. For high-risk targets (Action Meter 8.0+), prioritize safer alternatives when they appear in the dossier. If the dossier contains no alternatives, return an empty discovery_items array rather than inventing entries.
+- EVIDENCE-INTEGRITY BINDING (MANDATORY): The consumer_card narrative and every metric annotation may only assert what the evidence_receipts and floor_raiser_evidence actually support. Before writing any specific harm claim (malware, wallet drainer, theft, MLM, criminal operation, recruitment scheme, or similar), confirm a corresponding evidence_receipt exists at status "verified", or grounded floor_raiser_evidence supports it. If the supporting receipt is "unresolved", "not_found", "not_researched", or "not_applicable", the narrative must NOT state the harm as established fact. Downgrade to hedged, evidence-accurate language (for example "could not be verified", "shows the pattern of", "unconfirmed") instead of dropping the finding.
+- OPERATOR CONSISTENCY: If the narrative names a specific operator, developer, or entity as responsible, the attribution.operator_name evidence receipt must be "verified". If that receipt is "unresolved" or "not_found", do not name the entity as the confirmed actor in the consumer narrative. Describe the solicitation pattern instead, consistent with the receipt state.
+- No claim in the consumer narrative may be stronger than its matching Technical 411 evidence state. The receipt is the ceiling for the claim.
 - For solicitation recognition, describe the solicitation pattern independently of confirmed actor identity.`;
 
   const synthesisResult =
@@ -768,7 +786,7 @@ Instructions:
    * provider-grounded evidence from Pass 1 before scoring or
    * persistence.
    */
-  normalizeTechnicalEvidence(
+  await normalizeTechnicalEvidence(
     parsedData,
     pass1FinalVerification.sources
   );
