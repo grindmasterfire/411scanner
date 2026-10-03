@@ -290,6 +290,18 @@ function normalizeEvidenceReceipt(receipt, groundedSourceMap) {
     normalized.status = "unresolved";
   }
 
+  // WHY: a retained redirect must never read as verified. If the grounded
+  // source did not resolve to a real, inspectable URL (still a redirect, or
+  // empty), the claim is not provider-confirmed. Downgrade and drop the link.
+  if (
+    normalized.status === "verified" &&
+    (!normalized.source_url || isGroundingRedirect(normalized.source_url))
+  ) {
+    normalized.status = "unresolved";
+    normalized.source_url = "";
+    normalized.source_title = "";
+  }
+
   if (
     normalized.status === "verified" &&
     isSecRegistrationClaim(normalized) &&
@@ -344,9 +356,11 @@ async function normalizeTechnicalEvidence(report, groundingInput = []) {
   );
 
   ledger.network_telemetry = ledger.network_telemetry || {};
+  // WHY: drop any redirect that never resolved — the published source list
+  // must contain only real, inspectable URLs, same rule as the receipts.
   ledger.network_telemetry.grounding_sources = groundedSources
     .map((source) => preferredGroundedSourceUrl(source))
-    .filter(Boolean);
+    .filter((url) => url && !isGroundingRedirect(url));
 
   return report;
 }

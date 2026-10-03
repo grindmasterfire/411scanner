@@ -8,6 +8,8 @@ const {
   enforceTechnicalFactPrecision,
 } = require("../technicalFactPrecision");
 
+(async () => {
+
 const directUrl =
   "https://example.gov/record/123";
 
@@ -42,7 +44,7 @@ const direct = {
   },
 };
 
-normalizeTechnicalEvidence(
+await normalizeTechnicalEvidence(
   direct,
   {
     sources: [
@@ -94,7 +96,7 @@ const blocked = {
   },
 };
 
-normalizeTechnicalEvidence(
+await normalizeTechnicalEvidence(
   blocked,
   {
     sources: [
@@ -147,7 +149,7 @@ const resolved = {
   },
 };
 
-normalizeTechnicalEvidence(
+await normalizeTechnicalEvidence(
   resolved,
   {
     sources: [
@@ -171,3 +173,7 @@ assert.equal(
 );
 
 console.log("PASS: T01 Technical source regression");
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
