@@ -108,6 +108,7 @@ function buildScanReceipt({
   report = {},
   telemetry = null,
   sourceTelemetry = null,
+  groundingCause = null,
 }) {
   const aiResearchPerformed =
     isAiResearchMode(mode);
@@ -286,6 +287,13 @@ function buildScanReceipt({
 
     mode:
       mode || "unknown",
+
+    // WHY: carry the grounding-reject cause onto the stored receipt so
+    // health/business reports can classify blink vs model_refused.
+    groundingCause:
+      mode === "grounding_rejected"
+        ? (groundingCause || "unknown")
+        : null,
 
     cacheHit:
       !aiResearchPerformed,
