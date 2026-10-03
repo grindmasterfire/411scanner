@@ -96,7 +96,7 @@ fun PaywallModal(
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = "You've used all 3 free daily diagnostic scans. Subscribe for a monthly bucket of diagnostic scans.",
+                text = "You've used your free daily scan. Subscribe for a monthly bucket of diagnostic scans.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center

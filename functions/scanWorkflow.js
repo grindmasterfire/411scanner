@@ -60,6 +60,11 @@ const {
   recordGroundingRejectedAccounting,
 } = require("./scanBusinessLedger");
 
+const {
+  checkEntitlement,
+  consumeScan,
+} = require("./entitlementStore");
+
 /**
  * Execute one production scan.
  *
@@ -81,6 +86,8 @@ async function executeScan(
   // Loop A: identity is now available to the pipeline. Logged for
   // verification; server-side entitlement (Loop B) will consume it.
   console.log(`[scan] caller uid: ${uid || "anonymous"}`);
+
+  const __result = await (async () => {
   const imageBase64 = data.imageBase64;
   const mimeType = data.mimeType || "image/jpeg";
   const ocrText = data.ocrText || "";
@@ -90,6 +97,14 @@ async function executeScan(
     throw new HttpsError(
       "invalid-argument",
       "An image is required."
+    );
+  }
+
+  const entitlement = await checkEntitlement(db, uid);
+  if (!entitlement.allowed) {
+    throw new HttpsError(
+      "resource-exhausted",
+      "You've used all your scans for this billing period."
     );
   }
 
@@ -463,6 +478,10 @@ async function executeScan(
     identityHistory:
       persisted.identityHistory,
   };
+  })();
+
+  await consumeScan(db, uid);
+  return __result;
 }
 
 module.exports = {

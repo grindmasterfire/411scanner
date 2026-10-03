@@ -54,7 +54,8 @@ object QuotaManager {
      * Rest of World = 1 scan (CAC loss-leader expense)
      */
     fun getMaxDailyScans(context: Context): Int {
-        return if (AdManager.isTier1Market(context)) 3 else 1
+        // free tier: 1/day for everyone (3/day undercut the paid 30/mo bucket)
+        return 1
     }
 
     /**
@@ -67,7 +68,7 @@ object QuotaManager {
             val rentalExpiry = prefs[KEY_RENTAL_EXPIRY] ?: 0L
             val isRentalActive = System.currentTimeMillis() < rentalExpiry
             val isProfitable = AdManager.isTier1Market(context)
-            val maxDaily = if (isProfitable) 3 else 1
+            val maxDaily = 1
 
             val lastDate = prefs[KEY_LAST_SCAN_DATE] ?: today
             val usedToday = if (lastDate == today) (prefs[KEY_SCAN_COUNT] ?: 0) else 0
