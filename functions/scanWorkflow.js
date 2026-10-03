@@ -75,8 +75,12 @@ const {
 async function executeScan(
   db,
   serverTimestamp,
-  data = {}
+  data = {},
+  uid = null
 ) {
+  // Loop A: identity is now available to the pipeline. Logged for
+  // verification; server-side entitlement (Loop B) will consume it.
+  console.log(`[scan] caller uid: ${uid || "anonymous"}`);
   const imageBase64 = data.imageBase64;
   const mimeType = data.mimeType || "image/jpeg";
   const ocrText = data.ocrText || "";

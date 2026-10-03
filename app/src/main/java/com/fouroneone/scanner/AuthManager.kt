@@ -65,4 +65,19 @@ object AuthManager {
     }
 
     fun signOut() { try { auth?.signOut(); ensureGuestSession() } catch (e: Exception) {} }
+
+    // Loop A: the signed-in user's Firebase ID token, or null for none.
+    // Sent as a Bearer header so the backend can verify who is scanning.
+    suspend fun currentIdToken(): String? {
+        val user = auth?.currentUser ?: return null
+        // WHY: wrap the Play-Services Task in a coroutine using only
+        // kotlinx-coroutines-core (no coroutines-play-services dep needed).
+        return try {
+            kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+                user.getIdToken(false)
+                    .addOnSuccessListener { cont.resumeWith(Result.success(it.token)) }
+                    .addOnFailureListener { cont.resumeWith(Result.success(null)) }
+            }
+        } catch (e: Exception) { null }
+    }
 }

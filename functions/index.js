@@ -60,11 +60,19 @@ exports.scan = onCall(
     memory: "1GiB",
   },
   async (request) =>
-    executeScan(
-      db,
-      serverTimestamp,
-      request.data || {}
-    )
+    (async () => {
+      // WHY: learn who is scanning. Guests send no token and are allowed
+      // through as uid=null; only a present-but-invalid token is ignored.
+      let uid = null;
+      try {
+        const h = (request.rawRequest && request.rawRequest.headers && request.rawRequest.headers.authorization) || "";
+        if (h.startsWith("Bearer ")) {
+          const decoded = await admin.auth().verifyIdToken(h.slice(7));
+          uid = decoded.uid;
+        }
+      } catch (e) { uid = null; }
+      return executeScan(db, serverTimestamp, request.data || {}, uid);
+    })()
 );
 
 /**

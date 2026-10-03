@@ -80,10 +80,13 @@ object ScanRepository {
                 "application/json; charset=utf-8".toMediaType()
             )
 
-        val request = Request.Builder()
+        // WHY: identify the caller. Guests have no token and send no header.
+        val idToken = AuthManager.currentIdToken()
+        val builder = Request.Builder()
             .url(FUNCTION_URL)
             .post(requestBody)
-            .build()
+        if (idToken != null) builder.header("Authorization", "Bearer $idToken")
+        val request = builder.build()
 
         val response =
             httpClient.newCall(request).execute()
