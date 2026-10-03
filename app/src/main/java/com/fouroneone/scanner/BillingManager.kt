@@ -28,9 +28,14 @@ object BillingManager : PurchasesUpdatedListener {
 
     private const val TAG = "411_BillingManager"
 
-    const val PRODUCT_RENTAL_WEEKLY = "rental_weekly_399"
-    const val PRODUCT_RENTAL_MONTHLY = "rental_monthly_799"
-    const val PRODUCT_LIFETIME = "lifetime_pass_3599"
+    // Standard tier (the paywall shows these in v1)
+    const val PRODUCT_STANDARD_WEEKLY = "standard_weekly"
+    const val PRODUCT_STANDARD_MONTHLY = "standard_monthly"
+    const val PRODUCT_STANDARD_ANNUAL = "standard_annual"
+    // Professional tier (products exist in Play; paywall UI wired in a later loop)
+    const val PRODUCT_PRO_WEEKLY = "pro_weekly"
+    const val PRODUCT_PRO_MONTHLY = "pro_monthly"
+    const val PRODUCT_PRO_ANNUAL = "pro_annual"
 
     private var billingClient: BillingClient? = null
     private var appContext: Context? = null
@@ -83,22 +88,17 @@ object BillingManager : PurchasesUpdatedListener {
         val client = billingClient ?: return
         if (!client.isReady) return
 
-        val inAppProductList = listOf(
-            QueryProductDetailsParams.Product.newBuilder()
-                .setProductId(PRODUCT_LIFETIME)
-                .setProductType(BillingClient.ProductType.INAPP)
-                .build()
-        )
+        // All tiers are subscriptions now (no INAPP/lifetime).
+        fun sub(id: String) = QueryProductDetailsParams.Product.newBuilder()
+            .setProductId(id)
+            .setProductType(BillingClient.ProductType.SUBS)
+            .build()
+
+        val inAppProductList = emptyList<QueryProductDetailsParams.Product>()
 
         val subProductList = listOf(
-            QueryProductDetailsParams.Product.newBuilder()
-                .setProductId(PRODUCT_RENTAL_WEEKLY)
-                .setProductType(BillingClient.ProductType.SUBS)
-                .build(),
-            QueryProductDetailsParams.Product.newBuilder()
-                .setProductId(PRODUCT_RENTAL_MONTHLY)
-                .setProductType(BillingClient.ProductType.SUBS)
-                .build()
+            sub(PRODUCT_STANDARD_WEEKLY), sub(PRODUCT_STANDARD_MONTHLY), sub(PRODUCT_STANDARD_ANNUAL),
+            sub(PRODUCT_PRO_WEEKLY), sub(PRODUCT_PRO_MONTHLY), sub(PRODUCT_PRO_ANNUAL)
         )
 
         val paramsInApp = QueryProductDetailsParams.newBuilder()
@@ -109,11 +109,9 @@ object BillingManager : PurchasesUpdatedListener {
             .setProductList(subProductList)
             .build()
 
-        client.queryProductDetailsAsync(paramsInApp) { result, inAppDetailsList ->
+        // No INAPP products to query; go straight to subscriptions.
+        run {
             val updatedMap = _productDetailsMap.value.toMutableMap()
-            if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-                inAppDetailsList.forEach { updatedMap[it.productId] = it }
-            }
             client.queryProductDetailsAsync(paramsSubs) { subResult, subsDetailsList ->
                 if (subResult.responseCode == BillingClient.BillingResponseCode.OK) {
                     subsDetailsList.forEach { updatedMap[it.productId] = it }
@@ -176,10 +174,15 @@ object BillingManager : PurchasesUpdatedListener {
         if (purchase.purchaseState == Purchase.PurchaseState.PURCHASED) {
             billingScope.launch {
                 for (productId in purchase.products) {
+                    // Interim: grant a timed pass per billing period. Real per-user
+                    // scan-bucket entitlement moves server-side in Loop B.
                     when (productId) {
-                        PRODUCT_RENTAL_WEEKLY -> QuotaManager.grantRentalPass(context, hours = 24 * 7)
-                        PRODUCT_RENTAL_MONTHLY -> QuotaManager.grantRentalPass(context, hours = 24 * 30)
-                        PRODUCT_LIFETIME -> QuotaManager.grantLifetimeAccess(context)
+                        PRODUCT_STANDARD_WEEKLY, PRODUCT_PRO_WEEKLY ->
+                            QuotaManager.grantRentalPass(context, hours = 24 * 7)
+                        PRODUCT_STANDARD_MONTHLY, PRODUCT_PRO_MONTHLY ->
+                            QuotaManager.grantRentalPass(context, hours = 24 * 30)
+                        PRODUCT_STANDARD_ANNUAL, PRODUCT_PRO_ANNUAL ->
+                            QuotaManager.grantRentalPass(context, hours = 24 * 365)
                     }
                 }
             }

@@ -29,6 +29,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,8 +57,12 @@ fun PaywallModal(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val productDetails by BillingManager.productDetailsMap.collectAsState()
+    fun priceOf(id: String, fallback: String): String =
+        productDetails[id]?.subscriptionOfferDetails?.firstOrNull()
+            ?.pricingPhases?.pricingPhaseList?.firstOrNull()?.formattedPrice ?: fallback
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var selectedProductId by remember { mutableStateOf(BillingManager.PRODUCT_LIFETIME) }
+    var selectedProductId by remember { mutableStateOf(BillingManager.PRODUCT_STANDARD_MONTHLY) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -91,7 +96,7 @@ fun PaywallModal(
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = "You've used all 3 free daily diagnostic scans. Unlock unlimited instant evidence investigations.",
+                text = "You've used all 3 free daily diagnostic scans. Subscribe for a monthly bucket of diagnostic scans.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
@@ -100,54 +105,54 @@ fun PaywallModal(
             Spacer(modifier = Modifier.height(16.dp))
 
             TierSelectionCard(
-                title = "Weekly Rental Pass",
-                price = "$3.99 / week",
-                subtitle = "Unlimited scans for 7 days. Ideal for quick short-term audits.",
+                title = "Weekly",
+                price = priceOf(BillingManager.PRODUCT_STANDARD_WEEKLY, "$3.99 / week"),
+                subtitle = "Short-term access. A month of weeklies costs more than the monthly.",
                 icon = Icons.Default.HourglassTop,
-                isSelected = selectedProductId == BillingManager.PRODUCT_RENTAL_WEEKLY,
-                onClick = { selectedProductId = BillingManager.PRODUCT_RENTAL_WEEKLY },
+                isSelected = selectedProductId == BillingManager.PRODUCT_STANDARD_WEEKLY,
+                onClick = { selectedProductId = BillingManager.PRODUCT_STANDARD_WEEKLY },
                 testTag = "paywall_tier_weekly"
             )
 
             Spacer(modifier = Modifier.height(10.dp))
 
             TierSelectionCard(
-                title = "Monthly Rental Pass",
-                price = "$7.99 / month",
-                subtitle = "Full 30-day continuous diagnostic and scam investigation access.",
+                title = "Monthly  •  Best value",
+                price = priceOf(BillingManager.PRODUCT_STANDARD_MONTHLY, "$7.99 / month"),
+                subtitle = "30 diagnostic scans each month. The everyday plan.",
                 icon = Icons.Default.CalendarMonth,
-                isSelected = selectedProductId == BillingManager.PRODUCT_RENTAL_MONTHLY,
-                onClick = { selectedProductId = BillingManager.PRODUCT_RENTAL_MONTHLY },
+                isSelected = selectedProductId == BillingManager.PRODUCT_STANDARD_MONTHLY,
+                onClick = { selectedProductId = BillingManager.PRODUCT_STANDARD_MONTHLY },
                 testTag = "paywall_tier_monthly"
             )
 
             Spacer(modifier = Modifier.height(10.dp))
 
             TierSelectionCard(
-                title = "Lifetime Unlimited Pass",
-                price = "$35.99 one-time",
-                subtitle = "Permanent unlimited scans, priority grounding, zero ads forever.",
-                icon = Icons.Default.AllInclusive,
-                isSelected = selectedProductId == BillingManager.PRODUCT_LIFETIME,
-                onClick = { selectedProductId = BillingManager.PRODUCT_LIFETIME },
-                testTag = "paywall_tier_lifetime"
+                title = "Annual  •  2 months free",
+                price = priceOf(BillingManager.PRODUCT_STANDARD_ANNUAL, "$87.99 / year"),
+                subtitle = "A full year of monthly scan buckets at the lowest rate we can offer.",
+                icon = Icons.Default.CalendarMonth,
+                isSelected = selectedProductId == BillingManager.PRODUCT_STANDARD_ANNUAL,
+                onClick = { selectedProductId = BillingManager.PRODUCT_STANDARD_ANNUAL },
+                testTag = "paywall_tier_annual"
             )
 
             Spacer(modifier = Modifier.height(20.dp))
 
             val actionLabel = when (selectedProductId) {
-                BillingManager.PRODUCT_RENTAL_WEEKLY -> "Unlock Weekly Pass • $3.99"
-                BillingManager.PRODUCT_RENTAL_MONTHLY -> "Unlock Monthly Pass • $7.99"
-                else -> "Unlock Lifetime Pass • $35.99"
+                BillingManager.PRODUCT_STANDARD_WEEKLY -> "Subscribe Weekly"
+                BillingManager.PRODUCT_STANDARD_ANNUAL -> "Subscribe Annual"
+                else -> "Subscribe Monthly"
             }
 
             Button(
                 onClick = {
                     val activity = context as? Activity
                     val fallback = when (selectedProductId) {
-                        BillingManager.PRODUCT_RENTAL_WEEKLY -> onGrantWeekly
-                        BillingManager.PRODUCT_RENTAL_MONTHLY -> onGrantMonthly
-                        else -> onGrantLifetime
+                        BillingManager.PRODUCT_STANDARD_WEEKLY -> onGrantWeekly
+                        BillingManager.PRODUCT_STANDARD_ANNUAL -> onGrantLifetime
+                        else -> onGrantMonthly
                     }
 
                     if (activity != null) {
