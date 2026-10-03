@@ -17,3 +17,4 @@ local.properties
 .env
 debug.keystore
 .aider*
+app/google-services.json
