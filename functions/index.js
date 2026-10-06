@@ -30,6 +30,10 @@ const {
 } = require("./scanWorkflow");
 
 const {
+  grantEntitlement,
+} = require("./entitlementStore");
+
+const {
   getCachedDeepDive,
   setCachedDeepDive,
 } = require("./deepDiveCacheLayer");
@@ -176,5 +180,36 @@ exports.deepDive = onCall(
 
       telemetry,
     };
+  }
+);
+
+/*
+ * Grant a scan entitlement after a Play purchase.
+ * Verifies the caller's identity via the ID token (auto on onCall).
+ * TODO(play-verify): before launch, verify data.purchaseToken against the
+ * Google Play Developer API (purchases.subscriptions.get) and reject if the
+ * purchase is not ACTIVE for this productId. Until Play Console + a service
+ * account exist, this trusts the client-reported productId — NOT launch-safe.
+ */
+const PRODUCT_MAP = {
+  standard_weekly: { tier: "standard", period: "weekly" },
+  standard_monthly: { tier: "standard", period: "monthly" },
+  standard_annual: { tier: "standard", period: "annual" },
+  pro_weekly: { tier: "pro", period: "weekly" },
+  pro_monthly: { tier: "pro", period: "monthly" },
+  pro_annual: { tier: "pro", period: "annual" },
+};
+
+exports.grantEntitlement = onCall(
+  { region: "us-central1", timeoutSeconds: 30, memory: "256MiB" },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign-in required to grant a subscription.");
+    const data = request.data || {};
+    const map = PRODUCT_MAP[data.productId];
+    if (!map) throw new HttpsError("invalid-argument", "Unknown product.");
+    // TODO(play-verify): verify data.purchaseToken with Play before granting.
+    const doc = await grantEntitlement(db, uid, map.tier, map.period);
+    return { granted: true, tier: doc.tier, scansAllowed: doc.scansAllowed };
   }
 );

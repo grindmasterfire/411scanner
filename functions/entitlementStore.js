@@ -94,4 +94,28 @@ async function consumeScan(db, uid) {
   }
 }
 
-module.exports = { getEntitlement, checkEntitlement, consumeScan };
+/*
+ * Write/refresh a user's entitlement from a (verified) purchase.
+ * tier: "standard"|"pro"; period: "weekly"|"monthly"|"annual".
+ * Resets scansUsed to 0 and sets the next anniversary one period out.
+ */
+const DAY_MS = 24 * 60 * 60 * 1000;
+const PERIOD_MS = { weekly: 7*DAY_MS, monthly: 30*DAY_MS, annual: 365*DAY_MS };
+const SCANS = { standard: 30, pro: 60 };
+
+async function grantEntitlement(db, uid, tier, period) {
+  if (!uid) throw new Error("grantEntitlement: uid required");
+  const scansAllowed = SCANS[tier];
+  const periodMs = PERIOD_MS[period];
+  if (!scansAllowed || !periodMs) throw new Error(`grantEntitlement: bad tier/period ${tier}/${period}`);
+  const doc = {
+    tier, scansAllowed, scansUsed: 0,
+    periodMs,
+    anniversaryEpochMs: Date.now() + periodMs,
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+  await db.collection(COLLECTION).doc(uid).set(doc, { merge: true });
+  return doc;
+}
+
+module.exports = { getEntitlement, checkEntitlement, consumeScan, grantEntitlement };

@@ -14,6 +14,11 @@ import com.android.billingclient.api.Purchase
 import com.android.billingclient.api.PurchasesUpdatedListener
 import com.android.billingclient.api.QueryProductDetailsParams
 import com.android.billingclient.api.QueryPurchasesParams
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -184,6 +189,8 @@ object BillingManager : PurchasesUpdatedListener {
                         PRODUCT_STANDARD_ANNUAL, PRODUCT_PRO_ANNUAL ->
                             QuotaManager.grantRentalPass(context, hours = 24 * 365)
                     }
+                    // Server-side: write the real scan-bucket entitlement for this UID.
+                    grantEntitlementServerSide(productId, purchase.purchaseToken)
                 }
             }
 
@@ -195,6 +202,38 @@ object BillingManager : PurchasesUpdatedListener {
                     Log.d(TAG, "Purchase acknowledged: ${result.responseCode}")
                 }
             }
+        }
+    }
+
+    private val grantHttpClient by lazy { OkHttpClient() }
+
+    /*
+     * Tell the backend to write this user's entitlement doc. Server verifies
+     * identity from the Bearer ID token (and, once Play Console is set up, the
+     * purchase token). Best-effort: a failure here leaves the interim device
+     * grant in place; the server grant can be re-driven on next app open via
+     * queryActivePurchases.
+     */
+    private suspend fun grantEntitlementServerSide(productId: String, purchaseToken: String) {
+        val token = AuthManager.currentIdToken() ?: return  // guests can't own a sub
+        try {
+            val payload = JSONObject().apply {
+                put("data", JSONObject().apply {
+                    put("productId", productId)
+                    put("purchaseToken", purchaseToken)
+                })
+            }
+            val body = payload.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+            val req = Request.Builder()
+                .url("https://us-central1-scanner-4ea67.cloudfunctions.net/grantEntitlement")
+                .header("Authorization", "Bearer $token")
+                .post(body)
+                .build()
+            grantHttpClient.newCall(req).execute().use { resp ->
+                Log.d(TAG, "grantEntitlement response: ${resp.code}")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "grantEntitlement call failed: ${e.message}")
         }
     }
 
