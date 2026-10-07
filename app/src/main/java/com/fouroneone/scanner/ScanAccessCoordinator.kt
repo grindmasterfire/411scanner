@@ -19,9 +19,12 @@
  * 411 Scanner production Android access and monetization gate.
  *
  * @critical_rule:
- * Free tier: one completed rewarded ad BEFORE the scan executes. No
- * completed ad, no scan — including when the ad is unavailable. The gate
- * never fails open.
+ * Ad revenue subsidizes the free weekly scan and adds to variable profit.
+ * Everyone sees a rewarded ad before EVERY scan, except the tester account
+ * and the future Professional tier (V1). Free tier: the ad must COMPLETE —
+ * no completed ad, no scan. Subscribers: the ad is bonus revenue, not the
+ * price of the scan — the scan proceeds once the ad completes or is
+ * dismissed, and an unavailable ad never blocks a paying customer.
  *
  * Authorization and consumption are separate operations. This component may
  * authorize a scan, but only ScanExecutionWorkflow consumes quota after a
@@ -72,34 +75,40 @@ object ScanAccessCoordinator {
         val activity =
             context as? Activity
 
-        when {
-            /*
-             * Tester account and active subscribers: never ad-gated.
-             */
-            quotaStatus.isTesterUnlimited || quotaStatus.isUnlimited -> {
-                onAuthorized()
-            }
+        // Tester account: never gated. (Professional tier (V1) will bypass
+        // here too once the product exists.)
+        if (quotaStatus.isTesterUnlimited) {
+            onAuthorized()
+            return
+        }
 
-            /*
-             * Free tier: the rewarded ad must COMPLETE before the scan.
-             * Ad unavailable, ad dismissed early, or no Activity to show
-             * it — all deny the scan. The gate never fails open.
-             */
-            else -> {
-                if (activity != null) {
-                    AdManager.showRewardedGate(
-                        activity = activity,
-                        onRewardEarned = {
-                            onAuthorized()
-                        },
-                        onAdUnavailable = {
-                            onGateFailed("60102")
-                        }
-                    )
-                } else {
-                    onGateFailed("60102")
-                }
+        /*
+         * Everyone else sees a rewarded ad before EVERY scan.
+         *
+         * Free tier: strict — the ad must complete. Dismissed early,
+         * unavailable, or no Activity: the scan does not execute (60102).
+         *
+         * Subscribers: the ad is variable-profit revenue, not the price of
+         * the scan. The scan proceeds after the ad completes or is
+         * dismissed; an unavailable ad never blocks a paying customer.
+         */
+        if (activity != null) {
+            if (quotaStatus.isUnlimited) {
+                AdManager.showRewardedGate(
+                    activity = activity,
+                    onRewardEarned = { onAuthorized() },
+                    onAdUnavailable = { onAuthorized() },
+                    onAdDismissedEarly = { onAuthorized() }
+                )
+            } else {
+                AdManager.showRewardedGate(
+                    activity = activity,
+                    onRewardEarned = { onAuthorized() },
+                    onAdUnavailable = { onGateFailed("60102") }
+                )
             }
+        } else {
+            if (quotaStatus.isUnlimited) onAuthorized() else onGateFailed("60102")
         }
     }
 }
