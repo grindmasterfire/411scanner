@@ -30,7 +30,12 @@ const {
 } = require("./scanWorkflow");
 
 const {
+  getEntitlement,
+  checkDeepDiveEntitlement,
+  consumeDeepDive,
   grantEntitlement,
+  grantTopUp,
+  linkFamilySeat,
 } = require("./entitlementStore");
 
 const {
@@ -93,6 +98,26 @@ exports.deepDive = onCall(
     memory: "1GiB",
   },
   async (request) => {
+    // Deep dives spend top-up credits only — never subscription scans.
+    // Gate at the top; the credit is deducted after input validation and
+    // before any cache lookup or Gemini call, so malformed requests never
+    // burn credits while every delivered result costs exactly 1.
+    let uid = null;
+    try {
+      const h = (request.rawRequest && request.rawRequest.headers && request.rawRequest.headers.authorization) || "";
+      if (h.startsWith("Bearer ")) {
+        const decoded = await admin.auth().verifyIdToken(h.slice(7));
+        uid = decoded.uid;
+      }
+    } catch (e) { uid = null; }
+    const ddEntitlement = await checkDeepDiveEntitlement(db, uid);
+    if (!ddEntitlement.allowed) {
+      throw new HttpsError(
+        "resource-exhausted",
+        "Deep dive requires a top-up credit."
+      );
+    }
+
     const data =
       request.data || {};
 
@@ -118,6 +143,8 @@ exports.deepDive = onCall(
         "A cache key is required."
       );
     }
+
+    await consumeDeepDive(db, uid);
 
     const cachedDeepDive =
       await getCachedDeepDive(
@@ -186,19 +213,60 @@ exports.deepDive = onCall(
 /*
  * Grant a scan entitlement after a Play purchase.
  * Verifies the caller's identity via the ID token (auto on onCall).
- * TODO(play-verify): before launch, verify data.purchaseToken against the
- * Google Play Developer API (purchases.subscriptions.get) and reject if the
- * purchase is not ACTIVE for this productId. Until Play Console + a service
- * account exist, this trusts the client-reported productId — NOT launch-safe.
+ *
+ * Product IDs below MUST match the subscription / in-app product IDs
+ * created in Play Console exactly. Subscription products grant a tier
+ * bucket; top-up products (consumable) credit the subscriber's top-up bank.
+ *
+ * Play purchase verification (launch gate):
+ * Set PLAY_VERIFY_ENABLED=true in the function environment once the Play
+ * Console service account exists, then implement verifyPlayPurchase()
+ * against the Google Play Developer API (purchases.subscriptions.get /
+ * purchases.products.get) and reject unless the purchase is ACTIVE /
+ * ACKNOWLEDGED for the reported productId. Until then this trusts the
+ * client-reported productId — NOT launch-safe.
  */
 const PRODUCT_MAP = {
-  standard_weekly: { tier: "standard", period: "weekly" },
-  standard_monthly: { tier: "standard", period: "monthly" },
-  standard_annual: { tier: "standard", period: "annual" },
-  pro_weekly: { tier: "pro", period: "weekly" },
-  pro_monthly: { tier: "pro", period: "monthly" },
-  pro_annual: { tier: "pro", period: "annual" },
+  rental_weekly:   { kind: "subscription", tier: "rental", period: "weekly" },
+  // The Android app's BillingManager queries "standard_weekly" and the
+  // paywall sells it as the $3.99 weekly pass — that IS the rental tier,
+  // so the app-facing ID maps onto the rental grant.
+  standard_weekly: { kind: "subscription", tier: "rental", period: "weekly" },
+  standard_monthly:{ kind: "subscription", tier: "standard", period: "monthly" },
+  standard_annual: { kind: "subscription", tier: "standard", period: "annual" },
+  pro_monthly:     { kind: "subscription", tier: "pro", period: "monthly" },
+  pro_annual:      { kind: "subscription", tier: "pro", period: "annual" },
+  family_monthly:  { kind: "subscription", tier: "family", period: "monthly" },
+  family_annual:   { kind: "subscription", tier: "family", period: "annual" },
 };
+
+const TOPUP_MAP = {
+  topup_5:        { kind: "topup", scans: 5 },
+  topup_10:       { kind: "topup", scans: 10 },
+  topup_20:       { kind: "topup", scans: 20 },
+  topup_family_25:{ kind: "topup", scans: 25 },
+};
+
+/*
+ * Server-side Play verification hook. Returns { verified: true } or throws.
+ * Fail-closed: when verification is enabled but not yet implemented, every
+ * grant is rejected rather than trusted.
+ */
+async function verifyPlayPurchase(purchaseToken, productId) {
+  if (process.env.PLAY_VERIFY_ENABLED !== "true") {
+    console.warn(
+      "[play-verify] DISABLED — trusting client-reported productId. NOT launch-safe."
+    );
+    return { verified: true, mode: "trust-client" };
+  }
+  // TODO(play-verify): implement against the Play Developer API with the
+  // Play Console service account, then reject unless the purchase is
+  // ACTIVE (subscriptions) / ACKNOWLEDGED (consumables) for productId.
+  throw new HttpsError(
+    "failed-precondition",
+    "Play verification is enabled but not implemented."
+  );
+}
 
 exports.grantEntitlement = onCall(
   { region: "us-central1", timeoutSeconds: 30, memory: "256MiB" },
@@ -206,10 +274,35 @@ exports.grantEntitlement = onCall(
     const uid = request.auth && request.auth.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Sign-in required to grant a subscription.");
     const data = request.data || {};
-    const map = PRODUCT_MAP[data.productId];
+    const map = PRODUCT_MAP[data.productId] || TOPUP_MAP[data.productId];
     if (!map) throw new HttpsError("invalid-argument", "Unknown product.");
-    // TODO(play-verify): verify data.purchaseToken with Play before granting.
+    await verifyPlayPurchase(data.purchaseToken, data.productId);
+    if (map.kind === "topup") {
+      const result = await grantTopUp(db, uid, map.scans);
+      return { granted: true, kind: "topup", credited: result.credited };
+    }
     const doc = await grantEntitlement(db, uid, map.tier, map.period);
-    return { granted: true, tier: doc.tier, scansAllowed: doc.scansAllowed };
+    return { granted: true, kind: "subscription", tier: doc.tier, scansAllowed: doc.scansAllowed };
+  }
+);
+
+/*
+ * Link another Google account as a seat on the caller's family group.
+ * The caller must own a family group; the seat joins the shared bucket.
+ * data: { seatUid }
+ */
+exports.linkFamilySeat = onCall(
+  { region: "us-central1", timeoutSeconds: 30, memory: "256MiB" },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign-in required.");
+    const data = request.data || {};
+    if (!data.seatUid) throw new HttpsError("invalid-argument", "seatUid required.");
+    const ent = await getEntitlement(db, uid);
+    if (!ent || !ent.familyGroupId) {
+      throw new HttpsError("failed-precondition", "No family group found for this user.");
+    }
+    const result = await linkFamilySeat(db, ent.familyGroupId, uid, data.seatUid);
+    return { linked: true, ...result };
   }
 );
