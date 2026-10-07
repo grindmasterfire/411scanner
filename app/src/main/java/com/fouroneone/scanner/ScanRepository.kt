@@ -29,6 +29,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 object ScanRepository {
@@ -61,6 +62,27 @@ object ScanRepository {
         base64Image: String,
         ocrText: String = ""
     ): String = withContext(Dispatchers.IO) {
+        try {
+            executeScanRequest(base64Image, ocrText)
+        } catch (e: ScanFailureException) {
+            throw e
+        } catch (e: IOException) {
+            // No connectivity (or dropped mid-request): the user sees the
+            // 5-digit code and its sentence, never a raw transport error.
+            Log.e(TAG, "Scan transport failure", e)
+            val code5 = ScanErrorCodes.forTransportError(e)
+            throw ScanFailureException(code5, ScanErrorCodes.messageFor(code5))
+        }
+    }
+
+    /**
+     * Raw transport for one scan request. Throws ScanFailureException with
+     * the user-facing 5-digit code on HTTP errors.
+     */
+    private fun executeScanRequest(
+        base64Image: String,
+        ocrText: String
+    ): String {
         val payload = JSONObject().apply {
             put("data", JSONObject().apply {
                 put("imageBase64", base64Image)
@@ -93,19 +115,21 @@ object ScanRepository {
 
         val responseBodyString =
             response.body?.string()
-                ?: throw IllegalStateException(
-                    "Empty response from scan engine"
+                ?: throw ScanFailureException(
+                    ScanErrorCodes.FALLBACK_CODE,
+                    ScanErrorCodes.messageFor(ScanErrorCodes.FALLBACK_CODE)
                 )
 
         if (!response.isSuccessful) {
+            // Internal log keeps the raw HTTP status; the user only ever
+            // sees the 5-digit code plus its plain-language sentence.
             Log.e(
                 TAG,
                 "Scan HTTP error (${response.code}): $responseBodyString"
             )
 
-            throw IllegalStateException(
-                "Scan failed (${response.code}): $responseBodyString"
-            )
+            val code5 = ScanErrorCodes.forHttpStatus(response.code)
+            throw ScanFailureException(code5, ScanErrorCodes.messageFor(code5))
         }
 
         responseBodyString

@@ -145,6 +145,11 @@ fun ScannerMainScreen(
 
                 refreshRecentScans()
                 scanResult = rawResponse
+            } catch (e: ScanFailureException) {
+                // User-facing failure: plain-language sentence plus the
+                // 5-digit reference code. Raw HTTP statuses never reach users.
+                scanError =
+                    "${e.message}\nReference code: ${e.code5}"
             } catch (e: Exception) {
                 scanError =
                     e.message ?: "Scan failed unexpectedly"
