@@ -52,6 +52,90 @@ const {
   generateDeepDive,
 } = require("./deepDiveEngine");
 
+const {
+  estimateGeminiTokenCost,
+} = require("./tokenCostEstimator");
+
+const {
+  createScanRequestId,
+} = require("./scanLedgerIds");
+
+/**
+ * Append one deep-dive receipt to the immutable ledger. Never throws:
+ * observability must never break a deep dive. Failures are logged
+ * server-side for operator attention.
+ *
+ * Deep dives cost exactly 1 top-up credit each (consumed by the caller
+ * before this runs); the receipt records what the AI call itself cost.
+ */
+const DEEPDIVE_RECEIPTS_COLLECTION =
+  "deepdive_receipts";
+
+async function recordDeepDiveReceipt(
+  db,
+  {
+    requestId,
+    uid,
+    cacheHit,
+    telemetry = null,
+    failureCode5 = null,
+  }
+) {
+  try {
+    const usage =
+      telemetry || {};
+
+    const cost =
+      cacheHit || !telemetry
+        ? 0
+        : estimateGeminiTokenCost(
+            {
+              promptTokenCount:
+                usage.promptTokenCount || 0,
+              candidatesTokenCount:
+                usage.candidatesTokenCount ||
+                0,
+              thoughtsTokenCount:
+                usage.thoughtsTokenCount ||
+                0,
+            }
+          ).estimatedTokenCostUsd || 0;
+
+    await db
+      .collection(
+        DEEPDIVE_RECEIPTS_COLLECTION
+      )
+      .doc(requestId)
+      .create({
+        createdAt: new Date(),
+        requestId,
+        uid: uid || null,
+        operation: "deep_dive",
+        cacheHit: !!cacheHit,
+        creditConsumed: 1,
+        promptTokens:
+          usage.promptTokenCount || 0,
+        outputTokens:
+          usage.candidatesTokenCount ||
+          0,
+        thoughtTokens:
+          usage.thoughtsTokenCount || 0,
+        totalTokens:
+          usage.totalTokenCount || 0,
+        tokenCostUsd: cost,
+        failureCode5:
+          failureCode5 || null,
+      });
+  } catch (error) {
+    console.error(
+      "[deepdive-ledger] receipt write failed (dive unaffected):",
+      error && error.message
+        ? error.message
+        : error
+    );
+  }
+}
+
 admin.initializeApp();
 
 const db =
@@ -151,6 +235,9 @@ exports.deepDive = onCall(
 
     await consumeDeepDive(db, uid);
 
+    const requestId =
+      createScanRequestId();
+
     const cachedDeepDive =
       await getCachedDeepDive(
         cacheKey,
@@ -158,6 +245,14 @@ exports.deepDive = onCall(
       );
 
     if (cachedDeepDive) {
+      await recordDeepDiveReceipt(
+        db,
+        {
+          requestId,
+          uid,
+          cacheHit: true,
+        }
+      );
       return {
         deepDive:
           cachedDeepDive,
@@ -194,7 +289,32 @@ exports.deepDive = onCall(
         apiKey,
         reportSummary,
         targetName
+      ).catch(
+        async (error) => {
+          // The credit is already consumed; record the failure so the
+          // operator can see it (user-facing code 70101).
+          await recordDeepDiveReceipt(
+            db,
+            {
+              requestId,
+              uid,
+              cacheHit: false,
+              failureCode5: "70101",
+            }
+          );
+          throw error;
+        }
       );
+
+    await recordDeepDiveReceipt(
+      db,
+      {
+        requestId,
+        uid,
+        cacheHit: false,
+        telemetry,
+      }
+    );
 
     await setCachedDeepDive(
       cacheKey,

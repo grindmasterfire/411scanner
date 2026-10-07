@@ -38,6 +38,7 @@ async function recordReuseAccounting(
     sourceCacheKey = null,
     report,
     sourceTelemetry = null,
+    tier = null,
   }
 ) {
   const sourceInvestigationId =
@@ -52,6 +53,7 @@ async function recordReuseAccounting(
       mode,
       report,
       sourceTelemetry,
+      tier,
     });
 
   await createScanReceipt(
@@ -82,6 +84,7 @@ async function recordFreshAccounting(
     telemetry,
     composition = null,
     solicitationIdentityKey = null,
+    tier = null,
   }
 ) {
   const createdAt =
@@ -111,6 +114,7 @@ async function recordFreshAccounting(
       mode,
       report,
       telemetry,
+      tier,
     });
 
   await createScanReceipt(
@@ -137,6 +141,7 @@ async function recordGroundingRejectedAccounting(
     cacheKey,
     telemetry,
     groundingCause,
+    tier = null,
   }
 ) {
   const cause = groundingCause || "unknown";
@@ -150,6 +155,7 @@ async function recordGroundingRejectedAccounting(
       telemetry,
       groundingCause:
         cause,
+      tier,
       // User-facing failure code (locked 2026-10-07): model refusals and
       // empty-grounding blinks both surface as 30101.
       failureCode5:
