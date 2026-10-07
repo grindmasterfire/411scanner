@@ -247,6 +247,10 @@ fun ScannerMainScreen(
                             },
                             onPaywallRequired = {
                                 showPaywall = true
+                            },
+                            onGateFailed = { code5 ->
+                                scanError =
+                                    "${ScanErrorCodes.messageFor(code5)}\nReference code: $code5"
                             }
                         )
                 }

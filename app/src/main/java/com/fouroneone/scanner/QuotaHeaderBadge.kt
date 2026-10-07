@@ -40,29 +40,29 @@ fun QuotaHeaderBadge(
     val userState by AuthManager.userState.collectAsStateWithLifecycle()
 
     val (bgColor, textColor, icon, label) = when {
-        quotaStatus.isLifetimeUnlocked -> Quadruple(
+        quotaStatus.isTesterUnlimited -> Quadruple(
             MaterialTheme.colorScheme.primaryContainer,
             MaterialTheme.colorScheme.onPrimaryContainer,
             Icons.Default.WorkspacePremium,
-            "PRO LIFETIME UNLIMITED"
+            "TESTER UNLIMITED"
         )
         quotaStatus.isUnlimited -> Quadruple(
             MaterialTheme.colorScheme.tertiaryContainer,
             MaterialTheme.colorScheme.onTertiaryContainer,
             Icons.Default.LockClock,
-            "24H PASS ACTIVE"
+            "SUBSCRIPTION ACTIVE"
         )
         quotaStatus.remainingScans > 0 -> Quadruple(
             MaterialTheme.colorScheme.secondaryContainer,
             MaterialTheme.colorScheme.onSecondaryContainer,
             Icons.Default.Bolt,
-            "${quotaStatus.remainingScans}/${quotaStatus.maxDailyScans} FREE SCANS TODAY"
+            "${quotaStatus.remainingScans}/${quotaStatus.maxWeeklyScans} FREE SCAN THIS WEEK"
         )
         else -> Quadruple(
             MaterialTheme.colorScheme.errorContainer,
             MaterialTheme.colorScheme.onErrorContainer,
             Icons.Default.Bolt,
-            "0/${quotaStatus.maxDailyScans} SCANS • QUOTA REACHED"
+            "0/${quotaStatus.maxWeeklyScans} SCANS • WEEKLY QUOTA REACHED"
         )
     }
 

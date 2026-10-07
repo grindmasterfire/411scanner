@@ -101,7 +101,8 @@ object AdManager {
     fun showRewardedGate(
         activity: Activity,
         onRewardEarned: () -> Unit,
-        onAdUnavailable: () -> Unit
+        onAdUnavailable: () -> Unit,
+        onAdDismissedEarly: () -> Unit = onAdUnavailable
     ) {
         val currentAd = rewardedInterstitialAd
         if (currentAd != null) {
@@ -114,6 +115,8 @@ object AdManager {
                     loadRewardedInterstitial(activity.applicationContext)
                     if (rewardGranted) {
                         onRewardEarned()
+                    } else {
+                        onAdDismissedEarly()
                     }
                 }
 
