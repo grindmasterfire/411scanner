@@ -44,6 +44,11 @@ const {
 } = require("./deepDiveCacheLayer");
 
 const {
+  buildRevenueEvent,
+  logRevenueEvent,
+} = require("./revenueEvents");
+
+const {
   generateDeepDive,
 } = require("./deepDiveEngine");
 
@@ -272,17 +277,122 @@ exports.grantEntitlement = onCall(
   { region: "us-central1", timeoutSeconds: 30, memory: "256MiB" },
   async (request) => {
     const uid = request.auth && request.auth.uid;
-    if (!uid) throw new HttpsError("unauthenticated", "Sign-in required to grant a subscription.");
     const data = request.data || {};
-    const map = PRODUCT_MAP[data.productId] || TOPUP_MAP[data.productId];
-    if (!map) throw new HttpsError("invalid-argument", "Unknown product.");
-    await verifyPlayPurchase(data.purchaseToken, data.productId);
-    if (map.kind === "topup") {
-      const result = await grantTopUp(db, uid, map.scans);
-      return { granted: true, kind: "topup", credited: result.credited };
+    const productId = data.productId || null;
+
+    // Record a rejected grant attempt as a revenue event, then rethrow the
+    // original error. Rejections are the fraud/abuse signal. The event
+    // write never alters the outcome.
+    async function rejectAttempt(
+      reason,
+      error
+    ) {
+      await logRevenueEvent(
+        db,
+        buildRevenueEvent({
+          uid,
+          productId,
+          verificationMode: "unknown",
+          verificationVerified: false,
+          outcome: "rejected",
+          rejectionReason: reason,
+        })
+      );
+      throw error;
     }
-    const doc = await grantEntitlement(db, uid, map.tier, map.period);
-    return { granted: true, kind: "subscription", tier: doc.tier, scansAllowed: doc.scansAllowed };
+
+    if (!uid) {
+      await rejectAttempt(
+        "unauthenticated",
+        new HttpsError(
+          "unauthenticated",
+          "Sign-in required to grant a subscription."
+        )
+      );
+    }
+    const map =
+      PRODUCT_MAP[productId] ||
+      TOPUP_MAP[productId];
+    if (!map) {
+      await rejectAttempt(
+        "unknown-product",
+        new HttpsError(
+          "invalid-argument",
+          "Unknown product."
+        )
+      );
+    }
+
+    let verification;
+    try {
+      verification = await verifyPlayPurchase(
+        data.purchaseToken,
+        productId
+      );
+    } catch (error) {
+      await rejectAttempt(
+        "verify-failed",
+        error
+      );
+    }
+
+    const verifyMode =
+      (verification && verification.mode) ||
+      "unknown";
+    const verifyOk = !!(
+      verification && verification.verified
+    );
+    const playOrderId =
+      (verification &&
+        verification.playOrderId) ||
+      null;
+
+    async function recordGrant(
+      familyGroupId
+    ) {
+      await logRevenueEvent(
+        db,
+        buildRevenueEvent({
+          uid,
+          productId,
+          verificationMode: verifyMode,
+          verificationVerified: verifyOk,
+          playOrderId,
+          outcome: "granted",
+          familyGroupId:
+            familyGroupId || null,
+        })
+      );
+    }
+
+    if (map.kind === "topup") {
+      const result = await grantTopUp(
+        db,
+        uid,
+        map.scans
+      );
+      await recordGrant(null);
+      return {
+        granted: true,
+        kind: "topup",
+        credited: result.credited,
+      };
+    }
+    const doc = await grantEntitlement(
+      db,
+      uid,
+      map.tier,
+      map.period
+    );
+    await recordGrant(
+      doc.familyGroupId
+    );
+    return {
+      granted: true,
+      kind: "subscription",
+      tier: doc.tier,
+      scansAllowed: doc.scansAllowed,
+    };
   }
 );
 
