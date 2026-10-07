@@ -3,7 +3,6 @@ package com.fouroneone.scanner
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -19,168 +18,117 @@ import java.util.Locale
 val Context.quotaDataStore: DataStore<Preferences> by preferencesDataStore(name = "411_scan_quota")
 
 data class QuotaStatus(
-    val dailyScansUsed: Int = 0,
-    val maxDailyScans: Int = 3,
-    val isLifetimeUnlocked: Boolean = false,
+    val weeklyScansUsed: Int = 0,
+    val maxWeeklyScans: Int = 1,
+    val isTesterUnlimited: Boolean = false,
     val rentalExpiryTimestamp: Long = 0L,
-    val remainingScans: Int = 3,
-    val isUnlimited: Boolean = false,
-    val bankedAdScans: Int = 0,
-    val isProfitableMarket: Boolean = true,
-    val canWatchAdForExtraScan: Boolean = false
+    val remainingScans: Int = 1,
+    val isUnlimited: Boolean = false
 )
 
 /**
- * Manages daily scan quotas, geo-profitability caps (3 for Tier 1, 1 for Rest of World),
- * banked ad rewards, and paywall pass entitlements via Jetpack DataStore.
+ * Free-tier scan quota (S4, locked 2026-10-07): 1 scan per week, gated by one
+ * completed rewarded ad played BEFORE the scan executes. No completed ad,
+ * no scan. Subscribers and the tester account never see the ad gate.
+ *
+ * Banked ad scans, daily quotas, and the device lifetime flag are gone —
+ * none of them exist in the locked spec.
  */
 object QuotaManager {
 
-    private val KEY_SCAN_COUNT = intPreferencesKey("daily_scan_count")
-    private val KEY_BANKED_AD_SCANS = intPreferencesKey("banked_ad_scans")
-    private val KEY_LAST_SCAN_DATE = stringPreferencesKey("last_scan_date")
-    private val KEY_LIFETIME_UNLOCKED = booleanPreferencesKey("is_lifetime_unlocked")
-    private val KEY_RENTAL_EXPIRY = longPreferencesKey("rental_expiry_timestamp")
-    private val KEY_RENTAL_SCAN_STREAK = intPreferencesKey("rental_scan_streak")
+    /**
+     * Test hook: this signed-in account gets unlimited scans for testing.
+     * The email comes from Firebase Auth (verified Google sign-in), so it
+     * cannot be spoofed client-side. Revisit before public launch if a
+     * server-side tester flag is preferred.
+     */
+    private const val TESTER_UNLIMITED_EMAIL = "grindmasterfire@gmail.com"
 
-    private fun getTodayDateString(): String {
-        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+    private val KEY_WEEKLY_SCAN_COUNT = intPreferencesKey("weekly_scan_count")
+    private val KEY_LAST_SCAN_WEEK = stringPreferencesKey("last_scan_week")
+    private val KEY_RENTAL_EXPIRY = longPreferencesKey("rental_expiry_timestamp")
+
+    private fun getWeekKey(): String {
+        val sdf = SimpleDateFormat("yyyy-ww", Locale.US)
         return sdf.format(Date())
     }
 
-    /**
-     * Resolves the daily base free scan limit based on market profitability.
-     * Tier 1 (US, CA, UK, AU, etc.) = 3 scans
-     * Rest of World = 1 scan (CAC loss-leader expense)
-     */
-    fun getMaxDailyScans(context: Context): Int {
-        // free tier: 1/day for everyone (3/day undercut the paid 30/mo bucket)
-        return 1
+    /** Free tier: 1 scan per week. Spec rule — adjust bucket size, not price. */
+    fun getMaxWeeklyScans(): Int = 1
+
+    /** True when the signed-in user is the tester account. */
+    fun isTesterUnlimited(): Boolean {
+        val email = AuthManager.userState.value.email ?: return false
+        return email.equals(TESTER_UNLIMITED_EMAIL, ignoreCase = true)
+    }
+
+    private fun isRentalActive(prefs: Preferences): Boolean {
+        val rentalExpiry = prefs[KEY_RENTAL_EXPIRY] ?: 0L
+        return System.currentTimeMillis() < rentalExpiry
     }
 
     /**
      * Flow emitting the real-time quota entitlement state.
      */
     fun getQuotaStatusFlow(context: Context): Flow<QuotaStatus> {
-        val today = getTodayDateString()
         return context.quotaDataStore.data.map { prefs ->
-            val isLifetime = prefs[KEY_LIFETIME_UNLOCKED] ?: false
-            val rentalExpiry = prefs[KEY_RENTAL_EXPIRY] ?: 0L
-            val isRentalActive = System.currentTimeMillis() < rentalExpiry
-            val isProfitable = AdManager.isTier1Market(context)
-            val maxDaily = 1
+            val tester = isTesterUnlimited()
+            val rentalActive = isRentalActive(prefs)
+            val week = getWeekKey()
 
-            val lastDate = prefs[KEY_LAST_SCAN_DATE] ?: today
-            val usedToday = if (lastDate == today) (prefs[KEY_SCAN_COUNT] ?: 0) else 0
-            val bankedScans = prefs[KEY_BANKED_AD_SCANS] ?: 0
+            val lastWeek = prefs[KEY_LAST_SCAN_WEEK] ?: week
+            val usedThisWeek = if (lastWeek == week) (prefs[KEY_WEEKLY_SCAN_COUNT] ?: 0) else 0
 
-            val isUnlimited = isLifetime || isRentalActive
-            val baseRemaining = (maxDaily - usedToday).coerceAtLeast(0)
-            val totalRemaining = if (isUnlimited) 999 else (baseRemaining + bankedScans)
-
-            val canWatchExtra = isProfitable && !isUnlimited && totalRemaining == 0
+            val unlimited = tester || rentalActive
+            val remaining = if (unlimited) 999 else (getMaxWeeklyScans() - usedThisWeek).coerceAtLeast(0)
 
             QuotaStatus(
-                dailyScansUsed = usedToday,
-                maxDailyScans = maxDaily,
-                isLifetimeUnlocked = isLifetime,
-                rentalExpiryTimestamp = rentalExpiry,
-                remainingScans = totalRemaining,
-                isUnlimited = isUnlimited,
-                bankedAdScans = bankedScans,
-                isProfitableMarket = isProfitable,
-                canWatchAdForExtraScan = canWatchExtra
+                weeklyScansUsed = usedThisWeek,
+                maxWeeklyScans = getMaxWeeklyScans(),
+                isTesterUnlimited = tester,
+                rentalExpiryTimestamp = prefs[KEY_RENTAL_EXPIRY] ?: 0L,
+                remainingScans = remaining,
+                isUnlimited = unlimited
             )
         }
     }
 
     /**
      * Verifies if the user is entitled to perform a scan right now.
+     * Tester and active subscribers: always. Free tier: 1/week.
      */
     suspend fun canPerformScan(context: Context): Boolean {
-        val today = getTodayDateString()
+        if (isTesterUnlimited()) return true
         val prefs = context.quotaDataStore.data.first()
-        val isLifetime = prefs[KEY_LIFETIME_UNLOCKED] ?: false
-        val rentalExpiry = prefs[KEY_RENTAL_EXPIRY] ?: 0L
-        if (isLifetime || System.currentTimeMillis() < rentalExpiry) {
-            return true
-        }
+        if (isRentalActive(prefs)) return true
 
-        val maxDaily = getMaxDailyScans(context)
-        val lastDate = prefs[KEY_LAST_SCAN_DATE] ?: today
-        val count = if (lastDate == today) (prefs[KEY_SCAN_COUNT] ?: 0) else 0
-        val banked = prefs[KEY_BANKED_AD_SCANS] ?: 0
-
-        return (count < maxDaily) || (banked > 0)
+        val week = getWeekKey()
+        val lastWeek = prefs[KEY_LAST_SCAN_WEEK] ?: week
+        val count = if (lastWeek == week) (prefs[KEY_WEEKLY_SCAN_COUNT] ?: 0) else 0
+        return count < getMaxWeeklyScans()
     }
 
     /**
-     * Consumes one scan entitlement: uses free daily quota first, then banked ad credits.
+     * Consumes one free-tier weekly scan.
      */
     suspend fun recordScan(context: Context) {
-        val today = getTodayDateString()
-        val maxDaily = getMaxDailyScans(context)
-
+        val week = getWeekKey()
         context.quotaDataStore.edit { prefs ->
-            val lastDate = prefs[KEY_LAST_SCAN_DATE] ?: today
-            val currentCount = if (lastDate == today) (prefs[KEY_SCAN_COUNT] ?: 0) else 0
-            val banked = prefs[KEY_BANKED_AD_SCANS] ?: 0
-
-            prefs[KEY_LAST_SCAN_DATE] = today
-
-            if (currentCount < maxDaily) {
-                prefs[KEY_SCAN_COUNT] = currentCount + 1
-            } else if (banked > 0) {
-                prefs[KEY_BANKED_AD_SCANS] = banked - 1
-            }
+            val lastWeek = prefs[KEY_LAST_SCAN_WEEK] ?: week
+            val currentCount = if (lastWeek == week) (prefs[KEY_WEEKLY_SCAN_COUNT] ?: 0) else 0
+            prefs[KEY_LAST_SCAN_WEEK] = week
+            prefs[KEY_WEEKLY_SCAN_COUNT] = currentCount + 1
         }
     }
 
     /**
-     * Deposits +1 extra scan credit earned by watching an ad (restricted to Tier 1 markets).
-     */
-    suspend fun bankAdditionalAdScan(context: Context) {
-        if (!AdManager.isTier1Market(context)) return
-        context.quotaDataStore.edit { prefs ->
-            val currentBanked = prefs[KEY_BANKED_AD_SCANS] ?: 0
-            prefs[KEY_BANKED_AD_SCANS] = currentBanked + 1
-        }
-    }
-
-    /**
-     * Unlocks a 24-hour, weekly, or monthly Rental Pass.
+     * Interim device-side pass for subscription purchases. The server writes
+     * the real scan-bucket entitlement; this keeps the app usable offline.
      */
     suspend fun grantRentalPass(context: Context, hours: Int = 24) {
         val expiry = System.currentTimeMillis() + (hours * 3600 * 1000L)
         context.quotaDataStore.edit { prefs ->
             prefs[KEY_RENTAL_EXPIRY] = expiry
         }
-    }
-
-    /**
-     * Unlocks permanent Lifetime Pro access.
-     */
-    suspend fun grantLifetimeAccess(context: Context) {
-        context.quotaDataStore.edit { prefs ->
-            prefs[KEY_LIFETIME_UNLOCKED] = true
-        }
-    }
-
-    /**
-     * For rental pass users: bypasses ad for 2 scans, returns true on every 3rd scan.
-     */
-    suspend fun shouldShowAdForRental(context: Context): Boolean {
-        var showAd = false
-        context.quotaDataStore.edit { prefs ->
-            val currentStreak = prefs[KEY_RENTAL_SCAN_STREAK] ?: 0
-            if (currentStreak >= 2) {
-                showAd = true
-                prefs[KEY_RENTAL_SCAN_STREAK] = 0
-            } else {
-                showAd = false
-                prefs[KEY_RENTAL_SCAN_STREAK] = currentStreak + 1
-            }
-        }
-        return showAd
     }
 }
