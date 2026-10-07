@@ -22,7 +22,20 @@ object AdManager {
     private const val TAG = "411_AdManager"
 
     // Google AdMob official sample Rewarded Interstitial test ad unit ID
+    // (debug builds only — never earns, never bills).
     private const val SAMPLE_REWARDED_INTERSTITIAL_ID = "ca-app-pub-3940256099942544/5354046379"
+
+    // Production rewarded interstitial (release builds). Created 2026-10-07.
+    private const val PROD_REWARDED_INTERSTITIAL_ID = "ca-app-pub-1323472894046973/8930397909"
+
+    /**
+     * Debug builds always use Google's sample ID so testing never touches
+     * production ads (or generates invalid traffic). Release builds use
+     * the production unit.
+     */
+    private fun rewardedInterstitialId(): String =
+        if (BuildConfig.DEBUG) SAMPLE_REWARDED_INTERSTITIAL_ID
+        else PROD_REWARDED_INTERSTITIAL_ID
 
     private val TIER_1_MARKET_CODES = setOf(
         "US", "CA", "GB", "AU", "NZ", "DE", "FR", "JP", "CH", "NL", "SE", "NO", "DK", "AT", "IE"
@@ -76,7 +89,7 @@ object AdManager {
 
         RewardedInterstitialAd.load(
             context,
-            SAMPLE_REWARDED_INTERSTITIAL_ID,
+            rewardedInterstitialId(),
             adRequest,
             object : RewardedInterstitialAdLoadCallback() {
                 override fun onAdLoaded(ad: RewardedInterstitialAd) {
