@@ -38,27 +38,19 @@ fun ScannerAccessOverlays(
     if (showPaywall) {
         PaywallModal(
             onDismiss = onDismissPaywall,
-            onGrantWeekly = {
+            onFallbackGrant = { productId ->
                 coroutineScope.launch {
-                    QuotaManager.grantRentalPass(
-                        context,
-                        hours = 24 * 7
-                    )
-                }
-            },
-            onGrantMonthly = {
-                coroutineScope.launch {
-                    QuotaManager.grantRentalPass(
-                        context,
-                        hours = 24 * 30
-                    )
-                }
-            },
-            onGrantLifetime = {
-                coroutineScope.launch {
-                    QuotaManager.grantLifetimeAccess(
-                        context
-                    )
+                    // Interim device-side pass; the server writes the real
+                    // scan-bucket entitlement. Annuals get 365 days — never
+                    // a permanent unlock (no lifetime tier exists).
+                    val hours = when (productId) {
+                        BillingManager.PRODUCT_STANDARD_WEEKLY -> 24 * 7
+                        BillingManager.PRODUCT_STANDARD_MONTHLY,
+                        BillingManager.PRODUCT_PRO_MONTHLY,
+                        BillingManager.PRODUCT_FAMILY_MONTHLY -> 24 * 30
+                        else -> 24 * 365
+                    }
+                    QuotaManager.grantRentalPass(context, hours = hours)
                 }
             }
         )

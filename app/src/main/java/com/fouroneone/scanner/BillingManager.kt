@@ -33,14 +33,20 @@ object BillingManager : PurchasesUpdatedListener {
 
     private const val TAG = "411_BillingManager"
 
-    // Standard tier (the paywall shows these in v1)
+    // Subscription products (7 final — must match Play Console and server PRODUCT_MAP).
+    // Rental weekly is the $3.99 short-term pass (server aliases standard_weekly -> rental).
     const val PRODUCT_STANDARD_WEEKLY = "standard_weekly"
     const val PRODUCT_STANDARD_MONTHLY = "standard_monthly"
     const val PRODUCT_STANDARD_ANNUAL = "standard_annual"
-    // Professional tier (products exist in Play; paywall UI wired in a later loop)
-    const val PRODUCT_PRO_WEEKLY = "pro_weekly"
     const val PRODUCT_PRO_MONTHLY = "pro_monthly"
     const val PRODUCT_PRO_ANNUAL = "pro_annual"
+    const val PRODUCT_FAMILY_MONTHLY = "family_monthly"
+    const val PRODUCT_FAMILY_ANNUAL = "family_annual"
+    // Top-up products (consumables — server TOPUP_MAP; purchase UI lands post-launch).
+    const val PRODUCT_TOPUP_5 = "topup_5"
+    const val PRODUCT_TOPUP_10 = "topup_10"
+    const val PRODUCT_TOPUP_20 = "topup_20"
+    const val PRODUCT_TOPUP_FAMILY_25 = "topup_family_25"
 
     private var billingClient: BillingClient? = null
     private var appContext: Context? = null
@@ -93,17 +99,25 @@ object BillingManager : PurchasesUpdatedListener {
         val client = billingClient ?: return
         if (!client.isReady) return
 
-        // All tiers are subscriptions now (no INAPP/lifetime).
+        // Subscriptions (7 final) + top-up consumables (INAPP).
         fun sub(id: String) = QueryProductDetailsParams.Product.newBuilder()
             .setProductId(id)
             .setProductType(BillingClient.ProductType.SUBS)
             .build()
+        fun inApp(id: String) = QueryProductDetailsParams.Product.newBuilder()
+            .setProductId(id)
+            .setProductType(BillingClient.ProductType.INAPP)
+            .build()
 
-        val inAppProductList = emptyList<QueryProductDetailsParams.Product>()
+        val inAppProductList = listOf(
+            inApp(PRODUCT_TOPUP_5), inApp(PRODUCT_TOPUP_10),
+            inApp(PRODUCT_TOPUP_20), inApp(PRODUCT_TOPUP_FAMILY_25)
+        )
 
         val subProductList = listOf(
             sub(PRODUCT_STANDARD_WEEKLY), sub(PRODUCT_STANDARD_MONTHLY), sub(PRODUCT_STANDARD_ANNUAL),
-            sub(PRODUCT_PRO_WEEKLY), sub(PRODUCT_PRO_MONTHLY), sub(PRODUCT_PRO_ANNUAL)
+            sub(PRODUCT_PRO_MONTHLY), sub(PRODUCT_PRO_ANNUAL),
+            sub(PRODUCT_FAMILY_MONTHLY), sub(PRODUCT_FAMILY_ANNUAL)
         )
 
         val paramsInApp = QueryProductDetailsParams.newBuilder()
@@ -179,14 +193,14 @@ object BillingManager : PurchasesUpdatedListener {
         if (purchase.purchaseState == Purchase.PurchaseState.PURCHASED) {
             billingScope.launch {
                 for (productId in purchase.products) {
-                    // Interim: grant a timed pass per billing period. Real per-user
-                    // scan-bucket entitlement moves server-side in Loop B.
+                    // Interim device-side pass per billing period. The real
+                    // per-user scan-bucket entitlement is written server-side.
                     when (productId) {
-                        PRODUCT_STANDARD_WEEKLY, PRODUCT_PRO_WEEKLY ->
+                        PRODUCT_STANDARD_WEEKLY ->
                             QuotaManager.grantRentalPass(context, hours = 24 * 7)
-                        PRODUCT_STANDARD_MONTHLY, PRODUCT_PRO_MONTHLY ->
+                        PRODUCT_STANDARD_MONTHLY, PRODUCT_PRO_MONTHLY, PRODUCT_FAMILY_MONTHLY ->
                             QuotaManager.grantRentalPass(context, hours = 24 * 30)
-                        PRODUCT_STANDARD_ANNUAL, PRODUCT_PRO_ANNUAL ->
+                        PRODUCT_STANDARD_ANNUAL, PRODUCT_PRO_ANNUAL, PRODUCT_FAMILY_ANNUAL ->
                             QuotaManager.grantRentalPass(context, hours = 24 * 365)
                     }
                     // Server-side: write the real scan-bucket entitlement for this UID.
