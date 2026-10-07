@@ -16,6 +16,7 @@
  * node scripts/business-center.js today
  * node scripts/business-center.js week
  * node scripts/business-center.js month
+ * node scripts/business-center.js revenue [today|week|month]
  *
  * Calendar periods use UTC deliberately so accounting boundaries do not
  * depend on the workstation's local timezone.
@@ -27,7 +28,13 @@ const admin =
 const {
   buildBusinessSummary,
   formatBusinessSummary,
+  buildRevenueSummary,
+  formatRevenueSummary,
 } = require("../businessCenterReport");
+
+const {
+  REVENUE_EVENTS_COLLECTION,
+} = require("../revenueEvents");
 
 const PROJECT_ID =
   process.env.FIREBASE_PROJECT_ID ||
@@ -339,6 +346,84 @@ async function readPeriod(mode) {
   );
 }
 
+/**
+ * Revenue report for a UTC period: revenue events joined with the scan
+ * cost summary for the same period, so the profit line is apples-to-apples.
+ *
+ * Usage: node scripts/business-center.js revenue [today|week|month]
+ */
+async function readRevenue(period) {
+  const start =
+    getPeriodStart(period);
+
+  const startTs =
+    admin.firestore.Timestamp.fromDate(
+      start
+    );
+
+  const [revenueSnap, receiptSnap] =
+    await Promise.all([
+      db
+        .collection(
+          REVENUE_EVENTS_COLLECTION
+        )
+        .where(
+          "createdAt",
+          ">=",
+          startTs
+        )
+        .orderBy(
+          "createdAt",
+          "desc"
+        )
+        .get(),
+      db
+        .collection(
+          "scan_receipts"
+        )
+        .where(
+          "createdAt",
+          ">=",
+          startTs
+        )
+        .get(),
+    ]);
+
+  const events =
+    revenueSnap.docs.map(
+      (doc) =>
+        doc.data()
+    );
+
+  const receipts =
+    receiptSnap.docs.map(
+      (doc) =>
+        doc.data()
+    );
+
+  const costSummary =
+    buildBusinessSummary(
+      receipts
+    );
+
+  const incurredCost =
+    costSummary.costTotals
+      .incurredResearchCostUsdAtPaidRate;
+
+  const label =
+    `${period.toUpperCase()} UTC — since ${start.toISOString()}`;
+
+  console.log(
+    formatRevenueSummary(
+      buildRevenueSummary(
+        events
+      ),
+      incurredCost,
+      label
+    )
+  );
+}
+
 async function main() {
   const mode =
     String(
@@ -348,6 +433,31 @@ async function main() {
 
   if (mode === "last") {
     await readLastReceipt();
+    return;
+  }
+
+  if (mode === "revenue") {
+    const period =
+      String(
+        process.argv[3] ||
+        "week"
+      ).toLowerCase();
+
+    if (
+      ![
+        "today",
+        "week",
+        "month",
+      ].includes(
+        period
+      )
+    ) {
+      throw new Error(
+        "Use: revenue [today|week|month]"
+      );
+    }
+
+    await readRevenue(period);
     return;
   }
 
@@ -363,7 +473,7 @@ async function main() {
     )
   ) {
     throw new Error(
-      "Use one of: last, today, week, month"
+      "Use one of: last, today, week, month, revenue [today|week|month]"
     );
   }
 

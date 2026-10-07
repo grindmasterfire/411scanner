@@ -7,6 +7,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Revenue ledger: append-only accounting. No client access — the
+    // backend writes via Admin SDK and operators read via Business Center.
+    match /revenue_events/{eventId} {
+      allow read, write: if false;
+    }
+
     // Default deny for all other collections
     match /{document=**} {
       allow read, write: if false;
