@@ -13,6 +13,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Deep-dive ledger: same treatment — backend writes, operators read.
+    match /deepdive_receipts/{requestId} {
+      allow read, write: if false;
+    }
+
     // Default deny for all other collections
     match /{document=**} {
       allow read, write: if false;

@@ -76,6 +76,9 @@ node scripts/qa-last.js [n]
 
 # Revenue ledger (needs grant events; profit line joins revenue + AI cost)
 node scripts/business-center.js revenue [today|week|month]
+
+# Week-over-week trend (volume, money, reliability deltas)
+node scripts/business-center.js trend
 ```
 
 Reports include request modes, AI usage, research costs, cache performance, and failures broken down by 5-digit code — each with a plain-language explanation.
