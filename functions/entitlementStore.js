@@ -198,6 +198,49 @@ async function consumeScan(db, uid) {
 }
 
 /*
+ * Deep Dive gating: a deep dive spends exactly 1 top-up credit from the
+ * topUpScans bank — subscription scan credits are NEVER touched. Family
+ * members draw from the shared group bank (same resolveBucket path as
+ * consumeScan). Returns whether a credit is available.
+ */
+async function checkDeepDiveEntitlement(db, uid) {
+  const ent = await getEntitlement(db, uid);
+  if (!ent) return { allowed: false, topUpScans: 0 };
+  const bucket = await resolveBucket(db, uid, ent);
+  if (!bucket) return { allowed: false, topUpScans: 0 };
+  await maybeResetBucket(db, bucket.ref, bucket.data);
+  const topUpScans = Number(bucket.data.topUpScans) || 0;
+  return { allowed: topUpScans > 0, topUpScans };
+}
+
+/*
+ * Deduct 1 top-up credit for a delivered deep dive. Silent no-op (with a
+ * warn log) when the bank is empty — the gate in checkDeepDiveEntitlement
+ * prevents reaching here in that state. Same error-handling pattern as
+ * consumeScan.
+ */
+async function consumeDeepDive(db, uid) {
+  if (!uid) return;
+  try {
+    const ent = await getEntitlement(db, uid);
+    if (!ent) return;
+    const bucket = await resolveBucket(db, uid, ent);
+    if (!bucket) return;
+    const topUpScans = Number(bucket.data.topUpScans) || 0;
+    if (topUpScans <= 0) {
+      console.warn("[entitlement] deep dive consume with empty bank");
+      return;
+    }
+    await bucket.ref.update({
+      topUpScans: FieldValue.increment(-1),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    console.warn("[entitlement] deep dive consume failed:", e.message);
+  }
+}
+
+/*
  * Write/refresh a user's entitlement from a (verified) purchase.
  * tier: "rental"|"standard"|"pro"|"family";
  * period: "weekly"|"monthly"|"annual" (must be a listed GRANTS pair).
@@ -336,9 +379,10 @@ async function linkFamilySeat(db, groupId, ownerUid, seatUid) {
     throw new Error("linkFamilySeat: groupId, ownerUid, and seatUid required");
   }
   const groupRef = db.collection(FAMILY_COLLECTION).doc(groupId);
-  // Atomic read-check-write inside a transaction: two concurrent link calls
-  // must not push the group past MAX_FAMILY_SEATS (TOCTOU race). The member
-  // doc pointer is written after the transaction; it is idempotent.
+  // Atomic read-check-write inside a single transaction: the seat grant AND
+  // the member's pointer doc commit together, so concurrent link calls can
+  // neither exceed MAX_FAMILY_SEATS (TOCTOU) nor strand a seat without its
+  // bucket pointer.
   const alreadyLinked = await db.runTransaction(async (tx) => {
     const snap = await tx.get(groupRef);
     if (!snap.exists) throw new Error("linkFamilySeat: family group not found");
@@ -347,27 +391,30 @@ async function linkFamilySeat(db, groupId, ownerUid, seatUid) {
       throw new Error("linkFamilySeat: only the group owner can link seats");
     }
     const seats = Array.isArray(group.seats) ? group.seats : [];
-    if (seats.includes(seatUid)) return true;
-    if (seats.length >= MAX_FAMILY_SEATS) {
-      throw new Error("linkFamilySeat: family group is full (4 seats)");
+    const already = seats.includes(seatUid);
+    if (!already) {
+      if (seats.length >= MAX_FAMILY_SEATS) {
+        throw new Error("linkFamilySeat: family group is full (4 seats)");
+      }
+      tx.update(groupRef, {
+        seats: FieldValue.arrayUnion(seatUid),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
     }
-    tx.update(groupRef, {
-      seats: FieldValue.arrayUnion(seatUid),
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-    return false;
+    tx.set(
+      db.collection(COLLECTION).doc(seatUid),
+      {
+        tier: "family",
+        familyGroupId: groupId,
+        scansAllowed: 0,
+        scansUsed: 0,
+        topUpScans: 0,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    return already;
   });
-  await db.collection(COLLECTION).doc(seatUid).set(
-    {
-      tier: "family",
-      familyGroupId: groupId,
-      scansAllowed: 0,
-      scansUsed: 0,
-      topUpScans: 0,
-      updatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true }
-  );
   if (alreadyLinked) return { groupId, seatUid, alreadyLinked: true };
   return { groupId, seatUid, linked: true };
 }
@@ -376,7 +423,9 @@ module.exports = {
   getEntitlement,
   getFamilyGroup,
   checkEntitlement,
+  checkDeepDiveEntitlement,
   consumeScan,
+  consumeDeepDive,
   grantEntitlement,
   grantTopUp,
   linkFamilySeat,

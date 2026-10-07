@@ -31,6 +31,8 @@ const {
 
 const {
   getEntitlement,
+  checkDeepDiveEntitlement,
+  consumeDeepDive,
   grantEntitlement,
   grantTopUp,
   linkFamilySeat,
@@ -96,6 +98,26 @@ exports.deepDive = onCall(
     memory: "1GiB",
   },
   async (request) => {
+    // Deep dives spend top-up credits only — never subscription scans.
+    // Gate at the top; the credit is deducted after input validation and
+    // before any cache lookup or Gemini call, so malformed requests never
+    // burn credits while every delivered result costs exactly 1.
+    let uid = null;
+    try {
+      const h = (request.rawRequest && request.rawRequest.headers && request.rawRequest.headers.authorization) || "";
+      if (h.startsWith("Bearer ")) {
+        const decoded = await admin.auth().verifyIdToken(h.slice(7));
+        uid = decoded.uid;
+      }
+    } catch (e) { uid = null; }
+    const ddEntitlement = await checkDeepDiveEntitlement(db, uid);
+    if (!ddEntitlement.allowed) {
+      throw new HttpsError(
+        "resource-exhausted",
+        "Deep dive requires a top-up credit."
+      );
+    }
+
     const data =
       request.data || {};
 
@@ -121,6 +143,8 @@ exports.deepDive = onCall(
         "A cache key is required."
       );
     }
+
+    await consumeDeepDive(db, uid);
 
     const cachedDeepDive =
       await getCachedDeepDive(
