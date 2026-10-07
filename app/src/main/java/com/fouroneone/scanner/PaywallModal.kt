@@ -14,8 +14,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AllInclusive
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Button
@@ -45,15 +45,69 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
 /**
- * Paywall Modal Bottom Sheet presenting Weekly, Monthly, and Lifetime Unlimited Passes.
+ * Paywall Modal Bottom Sheet presenting all 7 subscription tiers.
+ * Fallback prices match the locked 2026-10-06 spec; live prices come from Play.
  */
+private data class PaywallTier(
+    val productId: String,
+    val title: String,
+    val fallbackPrice: String,
+    val subtitle: String,
+    val icon: ImageVector,
+    val testTag: String,
+    val actionLabel: String,
+)
+
+private val PAYWALL_TIERS = listOf(
+    PaywallTier(
+        BillingManager.PRODUCT_STANDARD_WEEKLY,
+        "Rental \u2022 7 days", "$3.99 / week",
+        "7 scans over 7 days. The short-term pass.",
+        Icons.Default.HourglassTop, "paywall_tier_rental", "Start Rental Week"
+    ),
+    PaywallTier(
+        BillingManager.PRODUCT_STANDARD_MONTHLY,
+        "Standard Monthly \u2022 Best value", "$12.99 / month",
+        "30 scans each month. The everyday plan.",
+        Icons.Default.CalendarMonth, "paywall_tier_standard_monthly", "Subscribe Monthly"
+    ),
+    PaywallTier(
+        BillingManager.PRODUCT_STANDARD_ANNUAL,
+        "Standard Annual \u2022 2 months free", "$129.99 / year",
+        "360 scans a year at the lowest Standard rate.",
+        Icons.Default.CalendarMonth, "paywall_tier_standard_annual", "Subscribe Annual"
+    ),
+    PaywallTier(
+        BillingManager.PRODUCT_PRO_MONTHLY,
+        "Pro Monthly", "$24.99 / month",
+        "60 scans each month. For heavy users.",
+        Icons.Default.CalendarMonth, "paywall_tier_pro_monthly", "Subscribe Pro Monthly"
+    ),
+    PaywallTier(
+        BillingManager.PRODUCT_PRO_ANNUAL,
+        "Pro Annual", "$249.99 / year",
+        "720 scans a year. Maximum power.",
+        Icons.Default.CalendarMonth, "paywall_tier_pro_annual", "Subscribe Pro Annual"
+    ),
+    PaywallTier(
+        BillingManager.PRODUCT_FAMILY_MONTHLY,
+        "Family Monthly", "$19.99 / month",
+        "40 shared scans a month, up to 4 seats.",
+        Icons.Default.Group, "paywall_tier_family_monthly", "Subscribe Family Monthly"
+    ),
+    PaywallTier(
+        BillingManager.PRODUCT_FAMILY_ANNUAL,
+        "Family Annual", "$199.99 / year",
+        "480 shared scans a year, up to 4 seats.",
+        Icons.Default.Group, "paywall_tier_family_annual", "Subscribe Family Annual"
+    ),
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PaywallModal(
     onDismiss: () -> Unit,
-    onGrantWeekly: () -> Unit,
-    onGrantMonthly: () -> Unit,
-    onGrantLifetime: () -> Unit,
+    onFallbackGrant: (productId: String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -86,7 +140,7 @@ fun PaywallModal(
             Spacer(modifier = Modifier.height(10.dp))
 
             Text(
-                text = "Daily Free Scan Limit Reached",
+                text = "Weekly Free Scan Used",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -96,7 +150,7 @@ fun PaywallModal(
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = "You've used your free daily scan. Subscribe for a monthly bucket of diagnostic scans.",
+                text = "You've used your free weekly scan. Pick a plan for a bucket of diagnostic scans.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
@@ -104,61 +158,32 @@ fun PaywallModal(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            TierSelectionCard(
-                title = "Weekly",
-                price = priceOf(BillingManager.PRODUCT_STANDARD_WEEKLY, "$3.99 / week"),
-                subtitle = "Short-term access. A month of weeklies costs more than the monthly.",
-                icon = Icons.Default.HourglassTop,
-                isSelected = selectedProductId == BillingManager.PRODUCT_STANDARD_WEEKLY,
-                onClick = { selectedProductId = BillingManager.PRODUCT_STANDARD_WEEKLY },
-                testTag = "paywall_tier_weekly"
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            TierSelectionCard(
-                title = "Monthly  •  Best value",
-                price = priceOf(BillingManager.PRODUCT_STANDARD_MONTHLY, "$12.99 / month"),
-                subtitle = "30 diagnostic scans each month. The everyday plan.",
-                icon = Icons.Default.CalendarMonth,
-                isSelected = selectedProductId == BillingManager.PRODUCT_STANDARD_MONTHLY,
-                onClick = { selectedProductId = BillingManager.PRODUCT_STANDARD_MONTHLY },
-                testTag = "paywall_tier_monthly"
-            )
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            TierSelectionCard(
-                title = "Annual  •  2 months free",
-                price = priceOf(BillingManager.PRODUCT_STANDARD_ANNUAL, "$129.99 / year"),
-                subtitle = "A full year of monthly scan buckets at the lowest rate we can offer.",
-                icon = Icons.Default.CalendarMonth,
-                isSelected = selectedProductId == BillingManager.PRODUCT_STANDARD_ANNUAL,
-                onClick = { selectedProductId = BillingManager.PRODUCT_STANDARD_ANNUAL },
-                testTag = "paywall_tier_annual"
-            )
+            PAYWALL_TIERS.forEachIndexed { index, tier ->
+                TierSelectionCard(
+                    title = tier.title,
+                    price = priceOf(tier.productId, tier.fallbackPrice),
+                    subtitle = tier.subtitle,
+                    icon = tier.icon,
+                    isSelected = selectedProductId == tier.productId,
+                    onClick = { selectedProductId = tier.productId },
+                    testTag = tier.testTag
+                )
+                if (index < PAYWALL_TIERS.lastIndex) Spacer(modifier = Modifier.height(10.dp))
+            }
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            val actionLabel = when (selectedProductId) {
-                BillingManager.PRODUCT_STANDARD_WEEKLY -> "Subscribe Weekly"
-                BillingManager.PRODUCT_STANDARD_ANNUAL -> "Subscribe Annual"
-                else -> "Subscribe Monthly"
-            }
+            val selectedTier = PAYWALL_TIERS.first { it.productId == selectedProductId }
 
             Button(
                 onClick = {
                     val activity = context as? Activity
-                    val fallback = when (selectedProductId) {
-                        BillingManager.PRODUCT_STANDARD_WEEKLY -> onGrantWeekly
-                        BillingManager.PRODUCT_STANDARD_ANNUAL -> onGrantLifetime
-                        else -> onGrantMonthly
-                    }
-
                     if (activity != null) {
-                        BillingManager.launchPurchase(activity, selectedProductId, fallback)
+                        BillingManager.launchPurchase(activity, selectedProductId) {
+                            onFallbackGrant(selectedProductId)
+                        }
                     } else {
-                        fallback()
+                        onFallbackGrant(selectedProductId)
                     }
                     onDismiss()
                 },
@@ -167,7 +192,7 @@ fun PaywallModal(
                     .height(50.dp)
                     .testTag("paywall_action_button")
             ) {
-                Text(text = actionLabel, fontWeight = FontWeight.Bold)
+                Text(text = selectedTier.actionLabel, fontWeight = FontWeight.Bold)
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -176,7 +201,7 @@ fun PaywallModal(
                 onClick = onDismiss,
                 modifier = Modifier.fillMaxWidth().testTag("paywall_cancel_button")
             ) {
-                Text("Cancel / Wait Until Tomorrow")
+                Text("Cancel / Wait Until Next Week")
             }
         }
     }

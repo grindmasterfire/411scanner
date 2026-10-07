@@ -109,6 +109,11 @@ function buildScanReceipt({
   telemetry = null,
   sourceTelemetry = null,
   groundingCause = null,
+  // Failure classification (locked 2026-10-07 taxonomy): the raw HTTP status
+  // stays internal; failureCode5 is the user-facing 5-digit code. Both null
+  // on success. The Business Center reports both; the app shows only code5.
+  failureHttpStatus = null,
+  failureCode5 = null,
 }) {
   const aiResearchPerformed =
     isAiResearchMode(mode);
@@ -288,6 +293,15 @@ function buildScanReceipt({
     mode:
       mode || "unknown",
 
+    // Failure classification (locked 2026-10-07): raw HTTP status stays
+    // internal; failureCode5 is the user-facing 5-digit code. Both null
+    // on success. The Business Center reports both; the app shows only code5.
+    failureHttpStatus:
+      failureHttpStatus != null ? Number(failureHttpStatus) : null,
+
+    failureCode5:
+      failureCode5 || null,
+
     // WHY: carry the grounding-reject cause onto the stored receipt so
     // health/business reports can classify blink vs model_refused.
     groundingCause:
@@ -347,6 +361,16 @@ function buildScanReceipt({
     plainEnglish: {
       whatHappened:
         describeMode(mode),
+
+      // User-facing failure readout (locked 2026-10-07): 5-digit code plus
+      // the plain-language sentence. Null when the scan succeeded.
+      failure:
+        failureCode5
+          ? {
+              code: failureCode5,
+              message: require("./scanErrorCodes").messageFor(failureCode5),
+            }
+          : null,
 
       costSummary,
 

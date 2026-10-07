@@ -139,6 +139,8 @@ async function recordGroundingRejectedAccounting(
     groundingCause,
   }
 ) {
+  const cause = groundingCause || "unknown";
+  const { causeToCode5 } = require("./scanErrorCodes");
   const receipt =
     buildScanReceipt({
       requestId,
@@ -147,7 +149,11 @@ async function recordGroundingRejectedAccounting(
         "grounding_rejected",
       telemetry,
       groundingCause:
-        groundingCause || "unknown",
+        cause,
+      // User-facing failure code (locked 2026-10-07): model refusals and
+      // empty-grounding blinks both surface as 30101.
+      failureCode5:
+        causeToCode5(cause === "model_refused" || cause === "blink" ? "grounding_rejected" : cause),
     });
 
   await createScanReceipt(
