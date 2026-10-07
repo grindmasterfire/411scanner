@@ -49,10 +49,12 @@ mlKitTextRecognition = "16.0.1"
 
 playServicesAds = "23.6.0"
 playBilling = "7.1.1"
+androidxBrowser = "1.8.0"
 
 
 [libraries]
 play-billing-ktx = { group = "com.android.billingclient", name = "billing-ktx", version.ref = "playBilling" }
+androidx-browser = { group = "androidx.browser", name = "browser", version.ref = "androidxBrowser" }
 play-services-ads = { group = "com.google.android.gms", name = "play-services-ads", version.ref = "playServicesAds" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }

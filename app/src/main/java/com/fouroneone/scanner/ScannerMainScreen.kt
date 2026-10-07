@@ -59,6 +59,7 @@ fun ScannerMainScreen(
 
     var showPaywall by remember { mutableStateOf(false) }
     var showAuthDialog by remember { mutableStateOf(false) }
+    var showDocsSheet by remember { mutableStateOf(false) }
     var selectedUri by remember(incomingUri) { mutableStateOf(incomingUri) }
     var loadedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var base64String by remember { mutableStateOf<String?>(null) }
@@ -214,6 +215,9 @@ fun ScannerMainScreen(
         onAuthClick = {
             showAuthDialog = true
         },
+        onDocsClick = {
+            showDocsSheet = true
+        },
         onPickImage = {
             photoPickerLauncher.launch(
                 PickVisualMediaRequest(
@@ -279,4 +283,12 @@ fun ScannerMainScreen(
             showAuthDialog = false
         }
     )
+
+    if (showDocsSheet) {
+        LegalDocumentsSheet(
+            onDismiss = {
+                showDocsSheet = false
+            }
+        )
+    }
 }
