@@ -345,11 +345,12 @@ exports.deepDive = onCall(
  *
  * Play purchase verification (launch gate):
  * Set PLAY_VERIFY_ENABLED=true in the function environment once the Play
- * Console service account exists, then implement verifyPlayPurchase()
- * against the Google Play Developer API (purchases.subscriptions.get /
- * purchases.products.get) and reject unless the purchase is ACTIVE /
- * ACKNOWLEDGED for the reported productId. Until then this trusts the
- * client-reported productId — NOT launch-safe.
+ * Console service account exists, plus PLAY_SERVICE_ACCOUNT_PATH (or
+ * PLAY_SERVICE_ACCOUNT_JSON). verifyPlayPurchase() in playVerification.js
+ * then checks every grant against the Google Play Developer API and rejects
+ * unless the purchase is ACTIVE (subscriptions) or purchased-and-unconsumed
+ * (top-up consumables). Until then this trusts the client-reported
+ * productId — NOT launch-safe.
  */
 const PRODUCT_MAP = {
   rental_weekly:   { kind: "subscription", tier: "rental", period: "weekly" },
@@ -374,23 +375,27 @@ const TOPUP_MAP = {
 
 /*
  * Server-side Play verification hook. Returns { verified: true } or throws.
- * Fail-closed: when verification is enabled but not yet implemented, every
- * grant is rejected rather than trusted.
+ * Fail-closed: when verification is enabled, every grant is checked against
+ * the Google Play Developer API and rejected unless the purchase is ACTIVE
+ * (subscriptions) or purchased-and-unconsumed (top-up consumables).
  */
-async function verifyPlayPurchase(purchaseToken, productId) {
+async function verifyPlayPurchase(purchaseToken, productId, kind) {
   if (process.env.PLAY_VERIFY_ENABLED !== "true") {
     console.warn(
       "[play-verify] DISABLED — trusting client-reported productId. NOT launch-safe."
     );
     return { verified: true, mode: "trust-client" };
   }
-  // TODO(play-verify): implement against the Play Developer API with the
-  // Play Console service account, then reject unless the purchase is
-  // ACTIVE (subscriptions) / ACKNOWLEDGED (consumables) for productId.
-  throw new HttpsError(
-    "failed-precondition",
-    "Play verification is enabled but not implemented."
-  );
+  // Real verification lives in playVerification.js; lazily required so
+  // trust-client mode never needs the googleapis dependency.
+  // eslint-disable-next-line global-require
+  const { verifyPlayPurchase: realVerify } = require("./playVerification");
+  try {
+    return await realVerify(purchaseToken, productId, kind);
+  } catch (error) {
+    // playVerification throws plain Errors carrying a code; convert.
+    throw new HttpsError(error.code || "internal", error.message);
+  }
 }
 
 exports.grantEntitlement = onCall(
@@ -447,7 +452,8 @@ exports.grantEntitlement = onCall(
     try {
       verification = await verifyPlayPurchase(
         data.purchaseToken,
-        productId
+        productId,
+        map.kind
       );
     } catch (error) {
       await rejectAttempt(
