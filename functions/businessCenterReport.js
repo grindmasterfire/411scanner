@@ -17,6 +17,8 @@
  * not an exact counterfactual future invoice.
  */
 
+const { messageFor } = require("./scanErrorCodes");
+
 function number(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -86,6 +88,9 @@ function buildBusinessSummary(receipts = []) {
   const freshCosts = [];
   let rejectedAttemptCostUsd = 0;
   let cacheReferenceSavingsUsd = 0;
+
+  // code5 -> { count, httpStatuses: { status: count } }
+  const failureCodes = {};
 
   const usageTotals = {
     promptTokens: 0,
@@ -173,6 +178,21 @@ function buildBusinessSummary(receipts = []) {
           cost.originalResearchCostUsdAtPaidRate
         );
     }
+
+    // Failure classification (locked 2026-10-07): count receipts carrying a
+    // user-facing 5-digit code, keeping the raw HTTP status alongside for
+    // internal correlation. Users never see the HTTP code.
+    const code5 = receipt?.failureCode5 || null;
+    if (code5) {
+      failureCodes[code5] = failureCodes[code5] || { count: 0, httpStatuses: {} };
+      failureCodes[code5].count += 1;
+      const hs = receipt?.failureHttpStatus;
+      if (hs != null) {
+        const key = String(hs);
+        failureCodes[code5].httpStatuses[key] =
+          (failureCodes[code5].httpStatuses[key] || 0) + 1;
+      }
+    }
   }
 
   const freshRequests =
@@ -216,6 +236,9 @@ function buildBusinessSummary(receipts = []) {
     groundingRejectedRequests,
     rejectCauses,
 
+    // User-facing 5-digit failure taxonomy (locked 2026-10-07).
+    failureCodes,
+
     cacheHits,
 
     cacheHitRate:
@@ -258,6 +281,25 @@ function formatBusinessSummary(
   summary,
   label = "Selected period"
 ) {
+  // Failure section: one line per 5-digit code with its plain-language
+  // explanation (the same sentence the user saw) plus the internal HTTP
+  // statuses for correlation. Users never see HTTP codes.
+  const failureCodes = summary.failureCodes || {};
+  const failureLines = [];
+  const sortedCodes = Object.keys(failureCodes).sort();
+  if (sortedCodes.length === 0) {
+    failureLines.push("  No coded failures recorded in this period.");
+  }
+  for (const code of sortedCodes) {
+    const entry = failureCodes[code];
+    const httpBits = Object.keys(entry.httpStatuses || {})
+      .sort()
+      .map((s) => `${s} x${entry.httpStatuses[s]}`)
+      .join(", ");
+    failureLines.push(`  [${code}] x${entry.count}: ${messageFor(code)}`);
+    if (httpBits) failureLines.push(`           (internal HTTP: ${httpBits})`);
+  }
+
   const lines = [
     "",
     "========================================",
@@ -270,6 +312,8 @@ function formatBusinessSummary(
     `Grounding rejected: ${integer(summary.groundingRejectedRequests)}`,
     `Cache Bank reuses: ${integer(summary.cacheHits)}`,
     `Cache hit rate: ${(number(summary.cacheHitRate) * 100).toFixed(1)}%`,
+    "In plain terms: how many scans came in, how many produced a finished",
+    "report, and how many were served from reports we already had.",
     "",
     "REQUEST MODES",
     `  Fresh analysis: ${integer(summary.modes.fresh_analysis)}`,
@@ -277,6 +321,14 @@ function formatBusinessSummary(
     `  Grounding rejected: ${integer(summary.modes.grounding_rejected)}`,
     `  Exact cache: ${integer(summary.modes.exact)}`,
     `  Cross-creative cache: ${integer(summary.modes.cross_creative)}`,
+    "In plain terms: how each request was handled — fresh AI investigation,",
+    "a reused report, or a rejection when the AI could not verify its work.",
+    "",
+    "FAILURES BY CODE",
+    ...failureLines,
+    "In plain terms: what went wrong, in the same words the user saw.",
+    "The 5-digit code is what users quote to support; HTTP codes are",
+    "internal only and never shown to users.",
     "",
     "AI USAGE",
     `  Prompt tokens: ${integer(summary.usageTotals.promptTokens)}`,
@@ -285,6 +337,8 @@ function formatBusinessSummary(
     `  Cached-content tokens: ${integer(summary.usageTotals.cachedContentTokens)}`,
     `  Total tokens: ${integer(summary.usageTotals.totalTokens)}`,
     `  Google searches: ${integer(summary.usageTotals.googleSearchQueries)}`,
+    "In plain terms: how much AI work the scans consumed. Bigger numbers",
+    "mean deeper investigations — and higher cost.",
     "",
     "RESEARCH COST",
     `  Gemini tokens: ${money(summary.costTotals.tokenCostUsd)}`,
@@ -292,6 +346,8 @@ function formatBusinessSummary(
     `  INCURRED AI RESEARCH: ${money(summary.costTotals.incurredResearchCostUsdAtPaidRate)}`,
     `  Rejected-attempt spend: ${money(summary.costTotals.rejectedAttemptCostUsd)}`,
     `  Cache reuse reference savings: ${money(summary.costTotals.cacheReferenceSavingsUsd)}`,
+    "In plain terms: what the AI research cost us this period. Cache reuses",
+    "keep this down — every reuse is a scan we did not have to pay for twice.",
     "",
     "SUCCESSFUL FRESH-SCAN COST DISTRIBUTION",
     `  Cheapest: ${money(summary.freshResearchCostStats.min)}`,
