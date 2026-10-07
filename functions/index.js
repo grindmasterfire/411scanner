@@ -30,6 +30,7 @@ const {
 } = require("./scanWorkflow");
 
 const {
+  getEntitlement,
   grantEntitlement,
   grantTopUp,
   linkFamilySeat,
@@ -273,7 +274,6 @@ exports.linkFamilySeat = onCall(
     if (!uid) throw new HttpsError("unauthenticated", "Sign-in required.");
     const data = request.data || {};
     if (!data.seatUid) throw new HttpsError("invalid-argument", "seatUid required.");
-    const { getEntitlement } = require("./entitlementStore");
     const ent = await getEntitlement(db, uid);
     if (!ent || !ent.familyGroupId) {
       throw new HttpsError("failed-precondition", "No family group found for this user.");

@@ -216,12 +216,47 @@ async function grantEntitlement(db, uid, tier, period) {
   const now = Date.now();
 
   if (tier === "family") {
-    const groupRef = db.collection(FAMILY_COLLECTION).doc();
+    // Renewal-safe: if the caller already owns a family group, refresh it
+    // in place (fresh bucket, preserved seats and top-up bank) instead of
+    // orphaning the old group and stranding linked seats on a stale bucket.
+    const existing = await getEntitlement(db, uid);
+    const existingGroupId = existing && existing.familyGroupId;
+    let groupRef = null;
+    let seats = [uid];
+    let preservedTopUp = 0;
+    if (existingGroupId) {
+      try {
+        const snap = await db.collection(FAMILY_COLLECTION).doc(existingGroupId).get();
+        if (snap.exists && snap.data().ownerUid === uid) {
+          groupRef = snap.ref;
+          const g = snap.data();
+          preservedTopUp = Number(g.topUpScans) || 0;
+          const prevSeats = Array.isArray(g.seats) ? g.seats : [];
+          seats = prevSeats.includes(uid) ? prevSeats : [uid, ...prevSeats].slice(0, MAX_FAMILY_SEATS);
+        }
+      } catch (e) {
+        console.warn("[entitlement] family refresh read failed:", e.message);
+      }
+    }
+    if (!groupRef) {
+      // New family purchase (or the old group is gone): fresh group.
+      groupRef = db.collection(FAMILY_COLLECTION).doc();
+      // If the buyer was a seat on a different group, release that seat so
+      // it doesn't linger as a stale entry consuming a slot.
+      if (existingGroupId) {
+        try {
+          await db.collection(FAMILY_COLLECTION).doc(existingGroupId).update({
+            seats: FieldValue.arrayRemove(uid),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        } catch (e) { /* old group may be gone; ignore */ }
+      }
+    }
     const groupDoc = {
       scansAllowed,
       scansUsed: 0,
-      topUpScans: 0,
-      seats: [uid],
+      topUpScans: preservedTopUp,
+      seats,
       ownerUid: uid,
       periodMs,
       anniversaryEpochMs: now + periodMs,
@@ -301,20 +336,26 @@ async function linkFamilySeat(db, groupId, ownerUid, seatUid) {
     throw new Error("linkFamilySeat: groupId, ownerUid, and seatUid required");
   }
   const groupRef = db.collection(FAMILY_COLLECTION).doc(groupId);
-  const snap = await groupRef.get();
-  if (!snap.exists) throw new Error("linkFamilySeat: family group not found");
-  const group = snap.data();
-  if (group.ownerUid !== ownerUid) {
-    throw new Error("linkFamilySeat: only the group owner can link seats");
-  }
-  const seats = Array.isArray(group.seats) ? group.seats : [];
-  if (seats.includes(seatUid)) return { groupId, seatUid, alreadyLinked: true };
-  if (seats.length >= MAX_FAMILY_SEATS) {
-    throw new Error("linkFamilySeat: family group is full (4 seats)");
-  }
-  await groupRef.update({
-    seats: FieldValue.arrayUnion(seatUid),
-    updatedAt: FieldValue.serverTimestamp(),
+  // Atomic read-check-write inside a transaction: two concurrent link calls
+  // must not push the group past MAX_FAMILY_SEATS (TOCTOU race). The member
+  // doc pointer is written after the transaction; it is idempotent.
+  const alreadyLinked = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(groupRef);
+    if (!snap.exists) throw new Error("linkFamilySeat: family group not found");
+    const group = snap.data();
+    if (group.ownerUid !== ownerUid) {
+      throw new Error("linkFamilySeat: only the group owner can link seats");
+    }
+    const seats = Array.isArray(group.seats) ? group.seats : [];
+    if (seats.includes(seatUid)) return true;
+    if (seats.length >= MAX_FAMILY_SEATS) {
+      throw new Error("linkFamilySeat: family group is full (4 seats)");
+    }
+    tx.update(groupRef, {
+      seats: FieldValue.arrayUnion(seatUid),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return false;
   });
   await db.collection(COLLECTION).doc(seatUid).set(
     {
@@ -327,6 +368,7 @@ async function linkFamilySeat(db, groupId, ownerUid, seatUid) {
     },
     { merge: true }
   );
+  if (alreadyLinked) return { groupId, seatUid, alreadyLinked: true };
   return { groupId, seatUid, linked: true };
 }
 
