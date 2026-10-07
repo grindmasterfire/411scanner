@@ -366,7 +366,295 @@ function formatBusinessSummary(
   return lines.join("\n");
 }
 
+/*
+ * Revenue ledger reporting (2026-10-07). Reads immutable revenue_events
+ * written by the grant path. Gross revenue only — Play's cut, taxes, and
+ * refunds live in Play Console, not here.
+ */
+
+/** Build one aggregate revenue report from already-selected events. */
+function buildRevenueSummary(
+  events = []
+) {
+  // productId -> { units, revenueUsd, kind, tier, period }
+  const byProduct = {};
+  // tier -> { units, revenueUsd }
+  const byTier = {};
+  const byKind = {
+    subscription: { units: 0, revenueUsd: 0 },
+    topup: { units: 0, revenueUsd: 0 },
+  };
+  // verification mode -> { events, revenueUsd }
+  const byVerification = {};
+  // rejectionReason -> { count, attemptedUsd }
+  const rejections = {};
+
+  let grantedEvents = 0;
+  let grantedRevenueUsd = 0;
+  let rejectedEvents = 0;
+
+  for (const event of events) {
+    const outcome = event?.outcome || "unknown";
+
+    if (outcome !== "granted") {
+      rejectedEvents += 1;
+      const reason =
+        event?.rejectionReason || "unknown";
+      rejections[reason] =
+        rejections[reason] || {
+          count: 0,
+          attemptedUsd: 0,
+        };
+      rejections[reason].count += 1;
+      rejections[reason].attemptedUsd +=
+        number(
+          event?.attemptedPriceUsd
+        );
+      continue;
+    }
+
+    grantedEvents += 1;
+    const revenue = number(event?.priceUsd);
+    grantedRevenueUsd += revenue;
+
+    const productId =
+      event?.productId || "unknown";
+    byProduct[productId] =
+      byProduct[productId] || {
+        units: 0,
+        revenueUsd: 0,
+        kind: event?.kind || null,
+        tier: event?.tier || null,
+        period: event?.period || null,
+      };
+    byProduct[productId].units += 1;
+    byProduct[productId].revenueUsd +=
+      revenue;
+
+    const tier = event?.tier || "topup";
+    byTier[tier] = byTier[tier] || {
+      units: 0,
+      revenueUsd: 0,
+    };
+    byTier[tier].units += 1;
+    byTier[tier].revenueUsd += revenue;
+
+    const kind = event?.kind;
+    if (
+      kind === "subscription" ||
+      kind === "topup"
+    ) {
+      byKind[kind].units += 1;
+      byKind[kind].revenueUsd += revenue;
+    }
+
+    const vMode =
+      (event?.verification &&
+        event.verification.mode) ||
+      "unknown";
+    byVerification[vMode] =
+      byVerification[vMode] || {
+        events: 0,
+        revenueUsd: 0,
+      };
+    byVerification[vMode].events += 1;
+    byVerification[vMode].revenueUsd +=
+      revenue;
+  }
+
+  /*
+   * MRR estimate: monthly at face, annual / 12, weekly x 4.33.
+   * Top-ups are not recurring and are excluded. Labeled an estimate —
+   * real MRR lives in Play Console with churn and proration.
+   */
+  let mrrEstimateUsd = 0;
+  for (const productId of Object.keys(
+    byProduct
+  )) {
+    const entry = byProduct[productId];
+    if (entry.kind !== "subscription") {
+      continue;
+    }
+    if (entry.period === "monthly") {
+      mrrEstimateUsd += entry.revenueUsd;
+    } else if (
+      entry.period === "annual"
+    ) {
+      mrrEstimateUsd +=
+        entry.revenueUsd / 12;
+    } else if (
+      entry.period === "weekly"
+    ) {
+      mrrEstimateUsd +=
+        entry.revenueUsd * 4.33;
+    }
+  }
+
+  return {
+    eventCount: events.length,
+    grantedEvents,
+    rejectedEvents,
+    grantedRevenueUsd,
+    byProduct,
+    byTier,
+    byKind,
+    byVerification,
+    rejections,
+    mrrEstimateUsd,
+  };
+}
+
+/**
+ * Format one revenue report for a non-specialist operator.
+ * incurredResearchCostUsd comes from the cost summary for the same period;
+ * together they form the profit line — the paycheck number.
+ */
+function formatRevenueSummary(
+  summary,
+  incurredResearchCostUsd = 0,
+  label = "Selected period"
+) {
+  const productLines = [];
+  const productIds = Object.keys(
+    summary.byProduct
+  ).sort();
+  if (!productIds.length) {
+    productLines.push(
+      "  No granted revenue events in this period."
+    );
+  }
+  for (const productId of productIds) {
+    const entry =
+      summary.byProduct[productId];
+    productLines.push(
+      `  ${productId}: ${entry.units} x ` +
+        `${money(entry.revenueUsd / Math.max(1, entry.units))} = ` +
+        `${money(entry.revenueUsd)}`
+    );
+  }
+
+  const tierLines = [];
+  const tiers = Object.keys(
+    summary.byTier
+  ).sort();
+  for (const tier of tiers) {
+    const entry = summary.byTier[tier];
+    tierLines.push(
+      `  ${tier}: ${entry.units} sale(s), ` +
+        `${money(entry.revenueUsd)}`
+    );
+  }
+  if (!tierLines.length) {
+    tierLines.push("  (none)");
+  }
+
+  const verifyLines = [];
+  const vModes = Object.keys(
+    summary.byVerification
+  ).sort();
+  for (const vMode of vModes) {
+    const entry =
+      summary.byVerification[vMode];
+    const share =
+      summary.grantedRevenueUsd > 0
+        ? (
+            (entry.revenueUsd /
+              summary.grantedRevenueUsd) *
+            100
+          ).toFixed(1)
+        : "0.0";
+    verifyLines.push(
+      `  ${vMode}: ${entry.events} event(s), ` +
+        `${money(entry.revenueUsd)} (${share}% of revenue)`
+    );
+  }
+  if (!verifyLines.length) {
+    verifyLines.push("  (none)");
+  }
+
+  const rejectionLines = [];
+  const reasons = Object.keys(
+    summary.rejections
+  ).sort();
+  if (!reasons.length) {
+    rejectionLines.push(
+      "  No rejected grant attempts in this period."
+    );
+  }
+  for (const reason of reasons) {
+    const entry =
+      summary.rejections[reason];
+    rejectionLines.push(
+      `  ${reason}: x${entry.count} ` +
+        `(attempted ${money(entry.attemptedUsd)})`
+    );
+  }
+
+  const cost = number(
+    incurredResearchCostUsd
+  );
+  const revenue = number(
+    summary.grantedRevenueUsd
+  );
+  const profit = revenue - cost;
+
+  const lines = [
+    "",
+    "========================================",
+    "411 SCANNER REVENUE CENTER",
+    "========================================",
+    `Period: ${label}`,
+    `Grant events: ${integer(summary.eventCount)} ` +
+      `(${integer(summary.grantedEvents)} granted, ` +
+      `${integer(summary.rejectedEvents)} rejected)`,
+    `GROSS REVENUE: ${money(revenue)}`,
+    `MRR estimate: ${money(summary.mrrEstimateUsd)}/mo`,
+    "In plain terms: what the business earned this period, before Play's",
+    "cut, taxes, and refunds (those live in Play Console).",
+    "",
+    "REVENUE BY PRODUCT",
+    ...productLines,
+    "",
+    "REVENUE BY TIER",
+    ...tierLines,
+    "",
+    "SUBSCRIPTIONS vs TOP-UPS",
+    `  Subscriptions: ${summary.byKind.subscription.units} sale(s), ` +
+      `${money(summary.byKind.subscription.revenueUsd)}`,
+    `  Top-ups: ${summary.byKind.topup.units} sale(s), ` +
+      `${money(summary.byKind.topup.revenueUsd)}`,
+    "",
+    "VERIFICATION MODE",
+    ...verifyLines,
+    "In plain terms: how much revenue was verified against Google Play",
+    "vs trusted from the app. Trust-client revenue is fraud exposure —",
+    "it should read 0% once real verification ships.",
+    "",
+    "REJECTED GRANT ATTEMPTS",
+    ...rejectionLines,
+    "In plain terms: purchase attempts that did not go through. A spike",
+    "here means abuse, a broken client, or verification trouble.",
+    "",
+    "PROFIT LINE",
+    `  Gross revenue:      ${money(revenue)}`,
+    `  AI research cost:   ${money(cost)}`,
+    `  GROSS MARGIN:       ${money(profit)}`,
+    "In plain terms: revenue minus what the scans cost to run. This is",
+    "the number that pays the bills. Cache reuses make this bigger —",
+    "every reuse is revenue without a matching AI bill.",
+    "",
+    "MRR is an estimate: monthly at face value, annual / 12, weekly x 4.33.",
+    "Top-ups are excluded (not recurring). Real MRR with churn lives in",
+    "Play Console.",
+    "========================================",
+  ];
+
+  return lines.join("\n");
+}
+
 module.exports = {
   buildBusinessSummary,
   formatBusinessSummary,
+  buildRevenueSummary,
+  formatRevenueSummary,
 };
