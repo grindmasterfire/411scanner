@@ -17,6 +17,7 @@
  * node scripts/business-center.js week
  * node scripts/business-center.js month
  * node scripts/business-center.js revenue [today|week|month]
+ * node scripts/business-center.js trend   (this week vs last week)
  *
  * Calendar periods use UTC deliberately so accounting boundaries do not
  * depend on the workstation's local timezone.
@@ -30,6 +31,8 @@ const {
   formatBusinessSummary,
   buildRevenueSummary,
   formatRevenueSummary,
+  buildDeepDiveSummary,
+  formatDeepDiveSummary,
 } = require("../businessCenterReport");
 
 const {
@@ -310,25 +313,50 @@ async function readPeriod(mode) {
   const start =
     getPeriodStart(mode);
 
-  const snapshot =
-    await db
-      .collection(
-        "scan_receipts"
-      )
-      .where(
-        "createdAt",
-        ">=",
-        admin.firestore.Timestamp
-          .fromDate(start)
-      )
-      .orderBy(
-        "createdAt",
-        "desc"
-      )
-      .get();
+  const startTs =
+    admin.firestore.Timestamp
+      .fromDate(start);
+
+  const [receiptSnap, diveSnap] =
+    await Promise.all([
+      db
+        .collection(
+          "scan_receipts"
+        )
+        .where(
+          "createdAt",
+          ">=",
+          startTs
+        )
+        .orderBy(
+          "createdAt",
+          "desc"
+        )
+        .get(),
+      db
+        .collection(
+          "deepdive_receipts"
+        )
+        .where(
+          "createdAt",
+          ">=",
+          startTs
+        )
+        .orderBy(
+          "createdAt",
+          "desc"
+        )
+        .get(),
+    ]);
 
   const receipts =
-    snapshot.docs.map(
+    receiptSnap.docs.map(
+      (doc) =>
+        doc.data()
+    );
+
+  const dives =
+    diveSnap.docs.map(
       (doc) =>
         doc.data()
     );
@@ -340,6 +368,15 @@ async function readPeriod(mode) {
     formatBusinessSummary(
       buildBusinessSummary(
         receipts
+      ),
+      label
+    )
+  );
+
+  console.log(
+    formatDeepDiveSummary(
+      buildDeepDiveSummary(
+        dives
       ),
       label
     )
@@ -424,6 +461,228 @@ async function readRevenue(period) {
   );
 }
 
+/**
+ * Week-over-week trend: this week vs last week on the metrics that matter.
+ * Deltas are shown as absolute change plus direction — no percentages on
+ * small numbers (they lie).
+ *
+ * Usage: node scripts/business-center.js trend
+ */
+async function readTrend() {
+  const thisWeekStart =
+    getPeriodStart("week");
+  const lastWeekStart = new Date(
+    thisWeekStart.getTime() -
+      7 * 24 * 3600 * 1000
+  );
+
+  const startTsThis =
+    admin.firestore.Timestamp.fromDate(
+      thisWeekStart
+    );
+  const startTsLast =
+    admin.firestore.Timestamp.fromDate(
+      lastWeekStart
+    );
+  const endTsLast =
+    admin.firestore.Timestamp.fromDate(
+      thisWeekStart
+    );
+
+  async function readRange(
+    collection,
+    startTs,
+    endTs
+  ) {
+    let query = db
+      .collection(collection)
+      .where(
+        "createdAt",
+        ">=",
+        startTs
+      );
+    if (endTs) {
+      query = query.where(
+        "createdAt",
+        "<",
+        endTs
+      );
+    }
+    const snap = await query.get();
+    return snap.docs.map(
+      (doc) => doc.data()
+    );
+  }
+
+  const [
+    receiptsThis,
+    receiptsLast,
+    eventsThis,
+    eventsLast,
+  ] = await Promise.all([
+    readRange(
+      "scan_receipts",
+      startTsThis,
+      null
+    ),
+    readRange(
+      "scan_receipts",
+      startTsLast,
+      endTsLast
+    ),
+    readRange(
+      REVENUE_EVENTS_COLLECTION,
+      startTsThis,
+      null
+    ),
+    readRange(
+      REVENUE_EVENTS_COLLECTION,
+      startTsLast,
+      endTsLast
+    ),
+  ]);
+
+  const businessThis =
+    buildBusinessSummary(
+      receiptsThis
+    );
+  const businessLast =
+    buildBusinessSummary(
+      receiptsLast
+    );
+  const revenueThis =
+    buildRevenueSummary(
+      eventsThis
+    );
+  const revenueLast =
+    buildRevenueSummary(
+      eventsLast
+    );
+
+  function deltaLine(
+    label,
+    thisValue,
+    lastValue,
+    format
+  ) {
+    const diff =
+      thisValue - lastValue;
+    const arrow =
+      diff > 0
+        ? "▲"
+        : diff < 0
+          ? "▼"
+          : "■";
+    const sign =
+      diff > 0 ? "+" : "";
+    return (
+      `  ${label}: ${format(thisValue)} ` +
+      `${arrow} ${sign}${format(diff)} vs last week ` +
+      `(${format(lastValue)})`
+    );
+  }
+
+  const intFmt = (v) =>
+    Math.round(v).toLocaleString(
+      "en-US"
+    );
+  const moneyFmt = (v) =>
+    `$${Number(v).toFixed(2)}`;
+  const pctFmt = (v) =>
+    `${(Number(v) * 100).toFixed(1)}%`;
+
+  const costThis =
+    businessThis.costTotals
+      .incurredResearchCostUsdAtPaidRate;
+  const costLast =
+    businessLast.costTotals
+      .incurredResearchCostUsdAtPaidRate;
+  const revThis =
+    revenueThis.grantedRevenueUsd;
+  const revLast =
+    revenueLast.grantedRevenueUsd;
+
+  const lines = [
+    "",
+    "========================================",
+    "411 SCANNER TREND — WEEK OVER WEEK",
+    "========================================",
+    `This week: since ${thisWeekStart.toISOString()}`,
+    `Last week: ${lastWeekStart.toISOString()} to ${thisWeekStart.toISOString()}`,
+    "",
+    "VOLUME",
+    deltaLine(
+      "Requests",
+      businessThis.requestCount,
+      businessLast.requestCount,
+      intFmt
+    ),
+    deltaLine(
+      "Resolved scans",
+      businessThis.resolvedRequests,
+      businessLast.resolvedRequests,
+      intFmt
+    ),
+    deltaLine(
+      "Cache hit rate",
+      businessThis.cacheHitRate,
+      businessLast.cacheHitRate,
+      pctFmt
+    ),
+    "",
+    "MONEY",
+    deltaLine(
+      "AI research cost",
+      costThis,
+      costLast,
+      moneyFmt
+    ),
+    deltaLine(
+      "Gross revenue",
+      revThis,
+      revLast,
+      moneyFmt
+    ),
+    deltaLine(
+      "Gross margin",
+      revThis - costThis,
+      revLast - costLast,
+      moneyFmt
+    ),
+    "",
+    "RELIABILITY",
+    deltaLine(
+      "Coded failures",
+      Object.values(
+        businessThis.failureCodes || {}
+      ).reduce(
+        (t, e) => t + e.count,
+        0
+      ),
+      Object.values(
+        businessLast.failureCodes || {}
+      ).reduce(
+        (t, e) => t + e.count,
+        0
+      ),
+      intFmt
+    ),
+    deltaLine(
+      "Grounding rejected",
+      businessThis.groundingRejectedRequests,
+      businessLast.groundingRejectedRequests,
+      intFmt
+    ),
+    "",
+    "In plain terms: are we growing, and is each week healthier than the",
+    "last? Rising requests with a steady or rising margin is the shape",
+    "you want. Rising costs without rising revenue is the shape you don't.",
+    "========================================",
+  ];
+
+  console.log(lines.join("\n"));
+}
+
 async function main() {
   const mode =
     String(
@@ -433,6 +692,11 @@ async function main() {
 
   if (mode === "last") {
     await readLastReceipt();
+    return;
+  }
+
+  if (mode === "trend") {
+    await readTrend();
     return;
   }
 
@@ -473,7 +737,7 @@ async function main() {
     )
   ) {
     throw new Error(
-      "Use one of: last, today, week, month, revenue [today|week|month]"
+      "Use one of: last, today, week, month, revenue [today|week|month], trend"
     );
   }
 

@@ -92,6 +92,9 @@ function buildBusinessSummary(receipts = []) {
   // code5 -> { count, httpStatuses: { status: count } }
   const failureCodes = {};
 
+  // tier -> { requests, resolved, freshCostUsd, cacheHits }
+  const byTier = {};
+
   const usageTotals = {
     promptTokens: 0,
     outputTokens: 0,
@@ -154,6 +157,40 @@ function buildBusinessSummary(receipts = []) {
     costTotals
       .incurredResearchCostUsdAtPaidRate +=
         incurred;
+
+    // Per-tier usage: who is scanning, and what their scans cost.
+    // Tier is stamped server-side on the receipt; "unknown" covers
+    // receipts written before tier stamping shipped.
+    const tier =
+      receipt?.tier || "unknown";
+    byTier[tier] = byTier[tier] || {
+      requests: 0,
+      resolved: 0,
+      freshCostUsd: 0,
+      cacheHits: 0,
+    };
+    byTier[tier].requests += 1;
+    if (
+      mode === "fresh_analysis" ||
+      mode === "stale_refresh" ||
+      mode === "exact" ||
+      mode === "cross_creative"
+    ) {
+      byTier[tier].resolved += 1;
+    }
+    if (
+      mode === "fresh_analysis" ||
+      mode === "stale_refresh"
+    ) {
+      byTier[tier].freshCostUsd +=
+        incurred;
+    }
+    if (
+      mode === "exact" ||
+      mode === "cross_creative"
+    ) {
+      byTier[tier].cacheHits += 1;
+    }
 
     if (
       mode === "fresh_analysis" ||
@@ -239,6 +276,9 @@ function buildBusinessSummary(receipts = []) {
     // User-facing 5-digit failure taxonomy (locked 2026-10-07).
     failureCodes,
 
+    // Per-tier usage (tier stamped server-side on each receipt).
+    byTier,
+
     cacheHits,
 
     cacheHitRate:
@@ -300,6 +340,24 @@ function formatBusinessSummary(
     if (httpBits) failureLines.push(`           (internal HTTP: ${httpBits})`);
   }
 
+  // Per-tier usage: one line per tier with requests, resolved scans,
+  // fresh AI cost, and cache hits.
+  const byTier = summary.byTier || {};
+  const tierLines = [];
+  const sortedTiers = Object.keys(byTier).sort();
+  if (sortedTiers.length === 0) {
+    tierLines.push("  No tier data in this period.");
+  }
+  for (const tier of sortedTiers) {
+    const entry = byTier[tier];
+    tierLines.push(
+      `  ${tier}: ${integer(entry.requests)} requests, ` +
+        `${integer(entry.resolved)} resolved, ` +
+        `${money(entry.freshCostUsd)} fresh AI cost, ` +
+        `${integer(entry.cacheHits)} cache reuses`
+    );
+  }
+
   const lines = [
     "",
     "========================================",
@@ -323,6 +381,11 @@ function formatBusinessSummary(
     `  Cross-creative cache: ${integer(summary.modes.cross_creative)}`,
     "In plain terms: how each request was handled — fresh AI investigation,",
     "a reused report, or a rejection when the AI could not verify its work.",
+    "",
+    "USAGE BY TIER",
+    ...tierLines,
+    "In plain terms: who is scanning. Watch the free tier for abuse, and",
+    "check that paid tiers are actually getting the scans they pay for.",
     "",
     "FAILURES BY CODE",
     ...failureLines,
@@ -652,9 +715,91 @@ function formatRevenueSummary(
   return lines.join("\n");
 }
 
+/*
+ * Deep Dive reporting. Deep dives spend top-up credits (1 each) and run a
+ * separate Gemini call whose cost is tracked here. Cache hits cost nothing.
+ */
+
+/** Build one aggregate deep-dive report from deepdive_receipts. */
+function buildDeepDiveSummary(
+  receipts = []
+) {
+  let total = 0;
+  let cacheHits = 0;
+  let failures = 0;
+  let tokenCostUsd = 0;
+  let promptTokens = 0;
+  let outputTokens = 0;
+
+  for (const receipt of receipts) {
+    total += 1;
+    if (receipt?.cacheHit) {
+      cacheHits += 1;
+    }
+    if (receipt?.failureCode5) {
+      failures += 1;
+    }
+    tokenCostUsd += number(
+      receipt?.tokenCostUsd
+    );
+    promptTokens += number(
+      receipt?.promptTokens
+    );
+    outputTokens += number(
+      receipt?.outputTokens
+    );
+  }
+
+  return {
+    total,
+    cacheHits,
+    cacheHitRate:
+      total > 0
+        ? cacheHits / total
+        : 0,
+    failures,
+    tokenCostUsd,
+    promptTokens,
+    outputTokens,
+    // Every dive costs exactly 1 top-up credit, hit or miss, success or
+    // failure — the credit is consumed before the cache/Gemini lookup.
+    creditsConsumed: total,
+  };
+}
+
+/** Format one deep-dive report for a non-specialist operator. */
+function formatDeepDiveSummary(
+  summary,
+  label = "Selected period"
+) {
+  const lines = [
+    "",
+    "========================================",
+    "411 SCANNER DEEP DIVE",
+    "========================================",
+    `Period: ${label}`,
+    `Deep dives: ${integer(summary.total)}`,
+    `Cache hits: ${integer(summary.cacheHits)} ` +
+      `(${(number(summary.cacheHitRate) * 100).toFixed(1)}%)`,
+    `Failures (70101): ${integer(summary.failures)}`,
+    `Top-up credits consumed: ${integer(summary.creditsConsumed)}`,
+    `AI token cost: ${money(summary.tokenCostUsd)}`,
+    `Prompt tokens: ${integer(summary.promptTokens)}`,
+    `Output tokens: ${integer(summary.outputTokens)}`,
+    "In plain terms: how many deep dives ran, how many were served from",
+    "cache for free, and what the AI calls cost. Every dive burns one",
+    "top-up credit — that is the revenue; the token cost is the expense.",
+    "========================================",
+  ];
+
+  return lines.join("\n");
+}
+
 module.exports = {
   buildBusinessSummary,
   formatBusinessSummary,
   buildRevenueSummary,
   formatRevenueSummary,
+  buildDeepDiveSummary,
+  formatDeepDiveSummary,
 };

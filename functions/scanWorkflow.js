@@ -153,6 +153,7 @@ async function executeScan(
           report: exactEntry.report,
           sourceTelemetry:
             exactEntry.telemetry || null,
+          tier: entitlement.tier || "free",
         }
       );
 
@@ -227,6 +228,7 @@ async function executeScan(
             candidate.report,
           sourceTelemetry:
             candidate.telemetry || null,
+          tier: entitlement.tier || "free",
         }
       );
 
@@ -317,6 +319,7 @@ async function executeScan(
             error.scanTelemetry,
           groundingCause:
             error.groundingCause,
+          tier: entitlement.tier || "free",
         }
       );
     }
@@ -460,6 +463,7 @@ async function executeScan(
         composition,
         solicitationIdentityKey:
           persisted.identityKey,
+        tier: entitlement.tier || "free",
       }
     );
 

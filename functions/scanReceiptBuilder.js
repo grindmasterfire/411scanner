@@ -109,6 +109,10 @@ function buildScanReceipt({
   telemetry = null,
   sourceTelemetry = null,
   groundingCause = null,
+  // Subscription tier of the caller at request time ("free", "rental",
+  // "standard", "pro", "family", or "paid" for legacy). stamped server-side
+  // from the entitlement check — never trusted from the client.
+  tier = null,
   // Failure classification (locked 2026-10-07 taxonomy): the raw HTTP status
   // stays internal; failureCode5 is the user-facing 5-digit code. Both null
   // on success. The Business Center reports both; the app shows only code5.
@@ -292,6 +296,11 @@ function buildScanReceipt({
 
     mode:
       mode || "unknown",
+
+    // Caller tier at request time, stamped server-side from the
+    // entitlement check. Powers per-tier Business Center reporting.
+    tier:
+      tier || "unknown",
 
     // Failure classification (locked 2026-10-07): raw HTTP status stays
     // internal; failureCode5 is the user-facing 5-digit code. Both null
