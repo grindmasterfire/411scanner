@@ -118,7 +118,7 @@ fun PaywallModal(
 
             TierSelectionCard(
                 title = "Monthly  •  Best value",
-                price = priceOf(BillingManager.PRODUCT_STANDARD_MONTHLY, "$7.99 / month"),
+                price = priceOf(BillingManager.PRODUCT_STANDARD_MONTHLY, "$12.99 / month"),
                 subtitle = "30 diagnostic scans each month. The everyday plan.",
                 icon = Icons.Default.CalendarMonth,
                 isSelected = selectedProductId == BillingManager.PRODUCT_STANDARD_MONTHLY,
@@ -130,7 +130,7 @@ fun PaywallModal(
 
             TierSelectionCard(
                 title = "Annual  •  2 months free",
-                price = priceOf(BillingManager.PRODUCT_STANDARD_ANNUAL, "$87.99 / year"),
+                price = priceOf(BillingManager.PRODUCT_STANDARD_ANNUAL, "$129.99 / year"),
                 subtitle = "A full year of monthly scan buckets at the lowest rate we can offer.",
                 icon = Icons.Default.CalendarMonth,
                 isSelected = selectedProductId == BillingManager.PRODUCT_STANDARD_ANNUAL,
