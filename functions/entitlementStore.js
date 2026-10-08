@@ -167,33 +167,79 @@ async function checkEntitlement(db, uid) {
 }
 
 /*
+ * Resolve the bucket doc inside a transaction. Returns { ref, data } or
+ * null when there is no bucket (free tier / orphaned pointer).
+ */
+async function resolveBucketTx(tx, db, uid, ent) {
+  if (!ent) return null;
+  if (ent.familyGroupId) {
+    const groupRef = db.collection(FAMILY_COLLECTION).doc(ent.familyGroupId);
+    const snap = await tx.get(groupRef);
+    if (!snap.exists) return null;
+    return { ref: groupRef, data: snap.data() };
+  }
+  const ref = db.collection(COLLECTION).doc(uid);
+  return { ref, data: ent };
+}
+
+/*
  * Count one delivered scan. Paid users only; guests are a no-op.
  * Cache hits DO consume (a scan is a scan to the user; costs us ~$0 = margin).
  * Subscription scans burn first (they expire); top-up bank spends last.
+ *
+ * Transactional: the balance check and the deduction happen atomically
+ * inside a single Firestore transaction, so a burst of concurrent scans
+ * cannot overdraft the bucket. checkEntitlement remains the advisory gate;
+ * this is the authoritative deduction.
+ * Returns { consumed: bool, via?: "subscription"|"topup", reason? }.
  */
 async function consumeScan(db, uid) {
-  if (!uid) return;
+  if (!uid) return { consumed: false, reason: "no_uid" };
   try {
-    const ent = await getEntitlement(db, uid);
-    if (!ent) return; // free tier — nothing to consume
-    const bucket = await resolveBucket(db, uid, ent);
-    if (!bucket) return;
-    const used = await maybeResetBucket(db, bucket.ref, bucket.data);
-    const scansAllowed = Number(bucket.data.scansAllowed) || 0;
-    const topUpScans = Number(bucket.data.topUpScans) || 0;
-    if (used < scansAllowed) {
-      await bucket.ref.update({
-        scansUsed: FieldValue.increment(1),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-    } else if (topUpScans > 0) {
-      await bucket.ref.update({
-        topUpScans: FieldValue.increment(-1),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
-    }
+    return await db.runTransaction(async (tx) => {
+      const entSnap = await tx.get(db.collection(COLLECTION).doc(uid));
+      const ent = entSnap.exists ? entSnap.data() : null;
+      const bucket = await resolveBucketTx(tx, db, uid, ent);
+      if (!bucket) return { consumed: false, reason: "free" };
+      const data = bucket.data || {};
+
+      // Anniversary reset, applied atomically inside the transaction.
+      const now = Date.now();
+      const anniv = Number(data.anniversaryEpochMs) || 0;
+      const period = Number(data.periodMs) || 0;
+      let used = Number(data.scansUsed) || 0;
+      let resetting = false;
+      let nextAnniv = anniv;
+      if (anniv && period && now >= anniv) {
+        nextAnniv = anniv;
+        while (now >= nextAnniv) nextAnniv += period; // multiple missed periods
+        used = 0;
+        resetting = true;
+      }
+
+      const allowed = Number(data.scansAllowed) || 0;
+      const topUp = Number(data.topUpScans) || 0;
+      const updates = { updatedAt: FieldValue.serverTimestamp() };
+      let via = null;
+      if (used < allowed) {
+        // A plain set and an increment cannot share a field in one update:
+        // after a reset, write the post-consume value directly.
+        updates.scansUsed = resetting ? 1 : FieldValue.increment(1);
+        via = "subscription";
+      } else if (topUp > 0) {
+        if (resetting) updates.scansUsed = 0;
+        updates.topUpScans = FieldValue.increment(-1);
+        via = "topup";
+      } else {
+        return { consumed: false, reason: "quota_exhausted" };
+      }
+      if (resetting) updates.anniversaryEpochMs = nextAnniv;
+      tx.update(bucket.ref, updates);
+      return { consumed: true, via };
+    });
   } catch (e) {
     console.warn("[entitlement] consume failed:", e.message);
+    return { consumed: false, reason: "error" };
   }
 }
 
@@ -214,29 +260,33 @@ async function checkDeepDiveEntitlement(db, uid) {
 }
 
 /*
- * Deduct 1 top-up credit for a delivered deep dive. Silent no-op (with a
- * warn log) when the bank is empty — the gate in checkDeepDiveEntitlement
- * prevents reaching here in that state. Same error-handling pattern as
- * consumeScan.
+ * Deduct 1 top-up credit for a delivered deep dive. Transactional: the
+ * empty-bank check and the deduction are atomic inside a single Firestore
+ * transaction, so a burst of concurrent dives cannot drive the bank
+ * negative. Subscription scan credits are NEVER touched.
+ *
+ * Returns { consumed: bool, reason? }. Callers MUST abort the dive when
+ * consumed is false — the credit is committed before the AI work begins.
  */
 async function consumeDeepDive(db, uid) {
-  if (!uid) return;
+  if (!uid) return { consumed: false, reason: "no_uid" };
   try {
-    const ent = await getEntitlement(db, uid);
-    if (!ent) return;
-    const bucket = await resolveBucket(db, uid, ent);
-    if (!bucket) return;
-    const topUpScans = Number(bucket.data.topUpScans) || 0;
-    if (topUpScans <= 0) {
-      console.warn("[entitlement] deep dive consume with empty bank");
-      return;
-    }
-    await bucket.ref.update({
-      topUpScans: FieldValue.increment(-1),
-      updatedAt: FieldValue.serverTimestamp(),
+    return await db.runTransaction(async (tx) => {
+      const entSnap = await tx.get(db.collection(COLLECTION).doc(uid));
+      const ent = entSnap.exists ? entSnap.data() : null;
+      const bucket = await resolveBucketTx(tx, db, uid, ent);
+      if (!bucket) return { consumed: false, reason: "no_entitlement" };
+      const topUp = Number((bucket.data || {}).topUpScans) || 0;
+      if (topUp <= 0) return { consumed: false, reason: "empty_bank" };
+      tx.update(bucket.ref, {
+        topUpScans: FieldValue.increment(-1),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return { consumed: true };
     });
   } catch (e) {
     console.warn("[entitlement] deep dive consume failed:", e.message);
+    return { consumed: false, reason: "error" };
   }
 }
 
