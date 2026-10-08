@@ -567,7 +567,8 @@ exports.linkFamilySeat = onCall(
 /*
  * Return the caller's subscription quota status for the badge/account UI.
  * Free tier returns { tier: "free" } with no bucket. Paid tiers return
- * scansAllowed, scansUsed, remaining, and topUpScans.
+ * scansAllowed, scansUsed, remaining, topUpScans, the billing anniversary,
+ * and family group info for owners/members.
  */
 exports.getQuotaStatus = onCall(
   { region: "us-central1", timeoutSeconds: 30, memory: "256MiB" },
@@ -579,12 +580,85 @@ exports.getQuotaStatus = onCall(
       return { tier: "free" };
     }
     const remaining = Math.max(0, (result.scansAllowed || 0) - (result.scansUsed || 0));
+
+    // Family group info for the account screen.
+    let family = null;
+    try {
+      const ent = await getEntitlement(db, uid);
+      if (ent && ent.familyGroupId) {
+        const gsnap = await db.collection("familyGroups").doc(ent.familyGroupId).get();
+        if (gsnap.exists) {
+          const g = gsnap.data();
+          family = {
+            groupId: ent.familyGroupId,
+            isOwner: g.ownerUid === uid,
+            seats: g.seats || [],
+            maxSeats: 4,
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("[getQuotaStatus] family read failed:", e.message);
+    }
+
+    // Billing anniversary for the "renews on" display.
+    let anniversaryEpochMs = null;
+    try {
+      const ent = await getEntitlement(db, uid);
+      if (ent) {
+        const bucket = ent.familyGroupId
+          ? (await db.collection("familyGroups").doc(ent.familyGroupId).get()).data()
+          : ent;
+        if (bucket && bucket.anniversaryEpochMs) anniversaryEpochMs = bucket.anniversaryEpochMs;
+      }
+    } catch (e) {
+      console.warn("[getQuotaStatus] anniversary read failed:", e.message);
+    }
+
     return {
       tier: result.tier,
       scansAllowed: result.scansAllowed || 0,
       scansUsed: result.scansUsed || 0,
       remaining,
       topUpScans: result.topUpScans || 0,
+      anniversaryEpochMs,
+      family,
     };
+  }
+);
+
+/*
+ * Invite a family member by email. The caller must own the family group.
+ * Resolves the email to a Firebase UID via Admin SDK, then links the seat.
+ * data: { email }
+ */
+exports.inviteFamilySeat = onCall(
+  { region: "us-central1", timeoutSeconds: 30, memory: "256MiB" },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign-in required.");
+    const data = request.data || {};
+    const email = (data.email || "").trim().toLowerCase();
+    if (!email) throw new HttpsError("invalid-argument", "email required.");
+
+    const ent = await getEntitlement(db, uid);
+    if (!ent || !ent.familyGroupId) {
+      throw new HttpsError("failed-precondition", "No family group found for this user.");
+    }
+
+    let seatUid;
+    try {
+      const user = await admin.auth().getUserByEmail(email);
+      seatUid = user.uid;
+    } catch (e) {
+      throw new HttpsError("not-found", "No 411 Scanner account found for that email.");
+    }
+
+    if (seatUid === uid) {
+      throw new HttpsError("invalid-argument", "You can't invite yourself.");
+    }
+
+    const result = await linkFamilySeat(db, ent.familyGroupId, uid, seatUid);
+    return { invited: true, email, ...result };
   }
 );

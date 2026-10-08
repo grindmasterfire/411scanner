@@ -2,10 +2,12 @@ package com.fouroneone.scanner
 
 import android.app.Activity
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -15,6 +17,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -129,6 +132,73 @@ fun PlansScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
             )
+
+            // Renewal date
+            sq?.anniversaryEpochMs?.let { epochMs ->
+                val sdf = java.text.SimpleDateFormat("MMM d, yyyy", java.util.Locale.US)
+                Text(
+                    text = "Renews ${sdf.format(java.util.Date(epochMs))}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+            }
+
+            // Family management (owners only)
+            sq?.family?.let { family ->
+                if (family.isOwner) {
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        text = "Family Seats (${family.seats.size}/${family.maxSeats})",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Start
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    var inviteEmail by remember { mutableStateOf("") }
+                    var inviteResult by remember { mutableStateOf<String?>(null) }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = inviteEmail,
+                            onValueChange = { inviteEmail = it; inviteResult = null },
+                            label = { Text("Member email") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    val ok = QuotaRepository.inviteFamilySeat(inviteEmail.trim())
+                                    inviteResult = if (ok) "Invited!" else "Invite failed — check the email."
+                                    if (ok) inviteEmail = ""
+                                }
+                            },
+                            enabled = inviteEmail.isNotBlank() && family.seats.size < family.maxSeats
+                        ) {
+                            Text("Invite")
+                        }
+                    }
+
+                    inviteResult?.let {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (it == "Invited!") MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(20.dp))
 
