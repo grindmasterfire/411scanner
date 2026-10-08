@@ -44,6 +44,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CardMembership
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -70,6 +71,7 @@ fun ScannerSurface(
     recentScans: List<ScanHistoryItem>,
     onAuthClick: () -> Unit,
     onDocsClick: () -> Unit = {},
+    onPlansClick: () -> Unit = {},
     onPickImage: () -> Unit,
     onRunScan: () -> Unit,
     onClearImage: () -> Unit,
@@ -92,6 +94,17 @@ fun ScannerSurface(
                                     .colorScheme
                                     .surfaceVariant
                         ),
+                navigationIcon = {
+                    IconButton(
+                        onClick = onPlansClick
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CardMembership,
+                            contentDescription = "Plans and subscriptions",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
                 actions = {
                     IconButton(
                         onClick = onDocsClick

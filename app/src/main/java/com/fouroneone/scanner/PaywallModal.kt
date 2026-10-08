@@ -13,8 +13,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Button
@@ -25,6 +27,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -48,7 +51,7 @@ import androidx.compose.ui.unit.dp
  * Paywall Modal Bottom Sheet presenting all 7 subscription tiers.
  * Fallback prices match the locked 2026-10-06 spec; live prices come from Play.
  */
-private data class PaywallTier(
+internal data class PaywallTier(
     val productId: String,
     val title: String,
     val fallbackPrice: String,
@@ -58,7 +61,7 @@ private data class PaywallTier(
     val actionLabel: String,
 )
 
-private val PAYWALL_TIERS = listOf(
+internal val SUBSCRIPTION_TIERS = listOf(
     PaywallTier(
         BillingManager.PRODUCT_STANDARD_WEEKLY,
         "Rental \u2022 7 days", "$3.99 / week",
@@ -103,20 +106,58 @@ private val PAYWALL_TIERS = listOf(
     ),
 )
 
+/**
+ * Top-up products (consumable, carry over, never expire).
+ * These are the impulse-appropriate offer for the quota-exhausted sheet.
+ */
+internal val TOPUP_TIERS = listOf(
+    PaywallTier(
+        BillingManager.PRODUCT_TOPUP_5,
+        "Top-Up • 5 scans", "$2.99",
+        "5 extra scans. Never expire.",
+        Icons.Default.Add, "paywall_topup_5", "Buy 5 Scans"
+    ),
+    PaywallTier(
+        BillingManager.PRODUCT_TOPUP_10,
+        "Top-Up • 10 scans", "$4.99",
+        "10 extra scans. Never expire.",
+        Icons.Default.Add, "paywall_topup_10", "Buy 10 Scans"
+    ),
+    PaywallTier(
+        BillingManager.PRODUCT_TOPUP_20,
+        "Top-Up • 20 scans", "$8.99",
+        "20 extra scans. Never expire.",
+        Icons.Default.Add, "paywall_topup_20", "Buy 20 Scans"
+    ),
+    PaywallTier(
+        BillingManager.PRODUCT_TOPUP_FAMILY_25,
+        "Family Top-Up • 25 scans", "$10.99",
+        "25 shared scans for the family bank. Never expire.",
+        Icons.Default.GroupAdd, "paywall_topup_family_25", "Buy 25 Scans"
+    ),
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PaywallModal(
     onDismiss: () -> Unit,
     onFallbackGrant: (productId: String) -> Unit,
+    onPlansClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val productDetails by BillingManager.productDetailsMap.collectAsState()
-    fun priceOf(id: String, fallback: String): String =
-        productDetails[id]?.subscriptionOfferDetails?.firstOrNull()
-            ?.pricingPhases?.pricingPhaseList?.firstOrNull()?.formattedPrice ?: fallback
+    fun priceOf(id: String, fallback: String): String {
+        val details = productDetails[id] ?: return fallback
+        // Subscriptions price via offer phases; one-time (top-up) products
+        // price via oneTimePurchaseOfferDetails.
+        details.subscriptionOfferDetails?.firstOrNull()
+            ?.pricingPhases?.pricingPhaseList?.firstOrNull()?.formattedPrice?.let { return it }
+        details.oneTimePurchaseOfferDetails?.formattedPrice?.let { return it }
+        return fallback
+    }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var selectedProductId by remember { mutableStateOf(BillingManager.PRODUCT_STANDARD_MONTHLY) }
+    var selectedProductId by remember { mutableStateOf(BillingManager.PRODUCT_TOPUP_10) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -150,7 +191,7 @@ fun PaywallModal(
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = "You've used your scans for now. Pick a plan for a bucket of diagnostic scans.",
+                text = "Top up your scan bank — these never expire.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
@@ -158,7 +199,7 @@ fun PaywallModal(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            PAYWALL_TIERS.forEachIndexed { index, tier ->
+            TOPUP_TIERS.forEachIndexed { index, tier ->
                 TierSelectionCard(
                     title = tier.title,
                     price = priceOf(tier.productId, tier.fallbackPrice),
@@ -168,12 +209,12 @@ fun PaywallModal(
                     onClick = { selectedProductId = tier.productId },
                     testTag = tier.testTag
                 )
-                if (index < PAYWALL_TIERS.lastIndex) Spacer(modifier = Modifier.height(10.dp))
+                if (index < TOPUP_TIERS.lastIndex) Spacer(modifier = Modifier.height(10.dp))
             }
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            val selectedTier = PAYWALL_TIERS.first { it.productId == selectedProductId }
+            val selectedTier = TOPUP_TIERS.first { it.productId == selectedProductId }
 
             Button(
                 onClick = {
@@ -203,12 +244,28 @@ fun PaywallModal(
             ) {
                 Text("Cancel / Wait Until Next Week")
             }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            TextButton(
+                onClick = {
+                    onDismiss()
+                    onPlansClick()
+                },
+                modifier = Modifier.testTag("paywall_plans_link")
+            ) {
+                Text(
+                    "Looking for a subscription? View plans",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun TierSelectionCard(
+internal fun TierSelectionCard(
     title: String,
     price: String,
     subtitle: String,
