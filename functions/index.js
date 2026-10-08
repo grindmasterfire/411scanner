@@ -235,8 +235,19 @@ exports.deepDive = onCall(
 
     // The credit is committed transactionally before any AI work begins.
     // If the race was lost (or the bank emptied since the gate), abort now —
-    // nothing was spent and nothing was deducted.
-    const diveConsume = await consumeDeepDive(db, uid);
+    // nothing was spent and nothing was deducted. Transient contention gets
+    // a few retries first; only a definitive refusal aborts the dive.
+    let diveConsume = await consumeDeepDive(db, uid);
+    for (
+      let attempt = 0;
+      attempt < 3 &&
+      !diveConsume.consumed &&
+      diveConsume.reason === "error";
+      attempt++
+    ) {
+      await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
+      diveConsume = await consumeDeepDive(db, uid);
+    }
     if (!diveConsume.consumed) {
       throw new HttpsError(
         "resource-exhausted",
