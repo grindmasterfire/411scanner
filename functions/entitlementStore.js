@@ -201,6 +201,17 @@ async function consumeScan(db, uid) {
       const ent = entSnap.exists ? entSnap.data() : null;
       const bucket = await resolveBucketTx(tx, db, uid, ent);
       if (!bucket) return { consumed: false, reason: "free" };
+
+      // Family restriction: blocked members cannot burn credits.
+      if (bucket.isFamily) {
+        const restricted = Array.isArray(bucket.data.restrictedSeats)
+          ? bucket.data.restrictedSeats
+          : [];
+        if (restricted.includes(uid)) {
+          return { consumed: false, reason: "restricted" };
+        }
+      }
+
       const data = bucket.data || {};
 
       // Anniversary reset, applied atomically inside the transaction.
@@ -235,6 +246,18 @@ async function consumeScan(db, uid) {
       }
       if (resetting) updates.anniversaryEpochMs = nextAnniv;
       tx.update(bucket.ref, updates);
+
+      // Family per-member activity tracking: record who burned the credit.
+      // Stored as memberActivity.{uid} = { scans, lastAt } on the group doc.
+      if (bucket.isFamily) {
+        const activityKey = `memberActivity.${uid}.scans`;
+        const lastAtKey = `memberActivity.${uid}.lastAt`;
+        tx.update(bucket.ref, {
+          [activityKey]: FieldValue.increment(1),
+          [lastAtKey]: FieldValue.serverTimestamp(),
+        });
+      }
+
       return { consumed: true, via };
     });
   } catch (e) {
@@ -469,6 +492,69 @@ async function linkFamilySeat(db, groupId, ownerUid, seatUid) {
   return { groupId, seatUid, linked: true };
 }
 
+/*
+ * Remove a family member (kick). Only the owner can kick, and cannot
+ * kick themselves. The member's entitlement pointer is deleted; their
+ * activity history stays on the group doc.
+ */
+async function removeFamilySeat(db, groupId, ownerUid, seatUid) {
+  if (!groupId || !ownerUid || !seatUid) {
+    throw new Error("removeFamilySeat: groupId, ownerUid, and seatUid required");
+  }
+  if (seatUid === ownerUid) {
+    throw new Error("removeFamilySeat: owner cannot remove themselves");
+  }
+  const groupRef = db.collection(FAMILY_COLLECTION).doc(groupId);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(groupRef);
+    if (!snap.exists) throw new Error("removeFamilySeat: family group not found");
+    if (snap.data().ownerUid !== ownerUid) {
+      throw new Error("removeFamilySeat: only the group owner can remove seats");
+    }
+    tx.update(groupRef, {
+      seats: FieldValue.arrayRemove(seatUid),
+      restrictedSeats: FieldValue.arrayRemove(seatUid),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    tx.delete(db.collection(COLLECTION).doc(seatUid));
+  });
+  return { groupId, seatUid, removed: true };
+}
+
+/*
+ * Restrict or unrestrict a family member. Restricted members cannot
+ * consume scans (consumeScan returns reason "restricted"). Only the
+ * owner can restrict; cannot restrict themselves.
+ */
+async function restrictFamilySeat(db, groupId, ownerUid, seatUid, restricted) {
+  if (!groupId || !ownerUid || !seatUid) {
+    throw new Error("restrictFamilySeat: groupId, ownerUid, and seatUid required");
+  }
+  if (seatUid === ownerUid) {
+    throw new Error("restrictFamilySeat: owner cannot restrict themselves");
+  }
+  const groupRef = db.collection(FAMILY_COLLECTION).doc(groupId);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(groupRef);
+    if (!snap.exists) throw new Error("restrictFamilySeat: family group not found");
+    const group = snap.data();
+    if (group.ownerUid !== ownerUid) {
+      throw new Error("restrictFamilySeat: only the group owner can restrict seats");
+    }
+    const seats = Array.isArray(group.seats) ? group.seats : [];
+    if (!seats.includes(seatUid)) {
+      throw new Error("restrictFamilySeat: not a member of this group");
+    }
+    tx.update(groupRef, {
+      restrictedSeats: restricted
+        ? FieldValue.arrayUnion(seatUid)
+        : FieldValue.arrayRemove(seatUid),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+  return { groupId, seatUid, restricted: !!restricted };
+}
+
 module.exports = {
   getEntitlement,
   getFamilyGroup,
@@ -479,6 +565,8 @@ module.exports = {
   grantEntitlement,
   grantTopUp,
   linkFamilySeat,
+  removeFamilySeat,
+  restrictFamilySeat,
   GRANTS,
   PERIOD_MS,
   MAX_FAMILY_SEATS,

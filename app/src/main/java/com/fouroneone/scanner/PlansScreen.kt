@@ -21,6 +21,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -150,12 +151,63 @@ fun PlansScreen(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        text = "Family Seats (${family.seats.size}/${family.maxSeats})",
+                        text = "Family Admin",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.fillMaxWidth(),
                         textAlign = TextAlign.Start
                     )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Detailed member list with activity, restrict, and kick.
+                    var familyDetails by remember { mutableStateOf<FamilyDetails?>(null) }
+                    var detailsLoading by remember { mutableStateOf(true) }
+
+                    LaunchedEffect(Unit) {
+                        familyDetails = QuotaRepository.getFamilyDetails()
+                        detailsLoading = false
+                    }
+
+                    if (detailsLoading) {
+                        Text(
+                            text = "Loading members...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        val details = familyDetails
+                        if (details != null) {
+                            Text(
+                                text = "${details.members.size}/${details.maxSeats} seats used",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            details.members.forEach { member ->
+                                MemberRow(
+                                    member = member,
+                                    onRestrictToggle = {
+                                        coroutineScope.launch {
+                                            QuotaRepository.restrictFamilySeat(
+                                                member.uid, !member.isRestricted
+                                            )
+                                            // Refresh the list
+                                            familyDetails = QuotaRepository.getFamilyDetails()
+                                        }
+                                    },
+                                    onKick = {
+                                        coroutineScope.launch {
+                                            QuotaRepository.removeFamilySeat(member.uid)
+                                            familyDetails = QuotaRepository.getFamilyDetails()
+                                        }
+                                    }
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+                        }
+                    }
 
                     Spacer(modifier = Modifier.height(8.dp))
 
@@ -179,10 +231,13 @@ fun PlansScreen(
                                 coroutineScope.launch {
                                     val ok = QuotaRepository.inviteFamilySeat(inviteEmail.trim())
                                     inviteResult = if (ok) "Invited!" else "Invite failed — check the email."
-                                    if (ok) inviteEmail = ""
+                                    if (ok) {
+                                        inviteEmail = ""
+                                        familyDetails = QuotaRepository.getFamilyDetails()
+                                    }
                                 }
                             },
-                            enabled = inviteEmail.isNotBlank() && family.seats.size < family.maxSeats
+                            enabled = inviteEmail.isNotBlank()
                         ) {
                             Text("Invite")
                         }
@@ -282,6 +337,74 @@ fun PlansScreen(
                     } ?: "Select a plan",
                     fontWeight = FontWeight.Bold
                 )
+            }
+        }
+    }
+}
+
+/**
+ * One row in the family admin board: member email, scan activity,
+ * restrict/unrestrict toggle, and kick button. Owner row has no actions.
+ */
+@Composable
+private fun MemberRow(
+    member: FamilyMember,
+    onRestrictToggle: () -> Unit,
+    onKick: () -> Unit
+) {
+    androidx.compose.material3.Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = member.email ?: "Unknown",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    val activityText = buildString {
+                        append("${member.scansUsed} scans")
+                        member.lastScanAt?.let {
+                            val sdf = java.text.SimpleDateFormat("MMM d", java.util.Locale.US)
+                            append(" • last ${sdf.format(java.util.Date(it))}")
+                        }
+                        if (member.isOwner) append(" • owner")
+                        if (member.isRestricted) append(" • RESTRICTED")
+                    }
+                    Text(
+                        text = activityText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (member.isRestricted) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            if (!member.isOwner) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)
+                ) {
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = onRestrictToggle,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(if (member.isRestricted) "Unrestrict" else "Restrict")
+                    }
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = onKick,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Kick", color = MaterialTheme.colorScheme.error)
+                    }
+                }
             }
         }
     }

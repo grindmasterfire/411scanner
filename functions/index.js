@@ -37,6 +37,8 @@ const {
   grantEntitlement,
   grantTopUp,
   linkFamilySeat,
+  removeFamilySeat,
+  restrictFamilySeat,
 } = require("./entitlementStore");
 
 const {
@@ -660,5 +662,116 @@ exports.inviteFamilySeat = onCall(
 
     const result = await linkFamilySeat(db, ent.familyGroupId, uid, seatUid);
     return { invited: true, email, ...result };
+  }
+);
+
+/*
+ * Get family group details for the admin board. Returns seats with
+ * per-member activity (scan count, last scan time), restriction status,
+ * and owner flag. Only members can call; only the owner gets emails.
+ * data: {} (uses caller's entitlement)
+ */
+exports.getFamilyDetails = onCall(
+  { region: "us-central1", timeoutSeconds: 30, memory: "256MiB" },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign-in required.");
+
+    const ent = await getEntitlement(db, uid);
+    if (!ent || !ent.familyGroupId) {
+      throw new HttpsError("failed-precondition", "No family group found.");
+    }
+
+    const gsnap = await db.collection("familyGroups").doc(ent.familyGroupId).get();
+    if (!gsnap.exists) {
+      throw new HttpsError("not-found", "Family group not found.");
+    }
+    const g = gsnap.data();
+    const isOwner = g.ownerUid === uid;
+    const seats = Array.isArray(g.seats) ? g.seats : [];
+    const restricted = Array.isArray(g.restrictedSeats) ? g.restrictedSeats : [];
+    const activity = g.memberActivity || {};
+
+    // Resolve emails for the owner via Admin SDK.
+    const members = [];
+    for (const seatUid of seats) {
+      let email = null;
+      if (isOwner) {
+        try {
+          const user = await admin.auth().getUser(seatUid);
+          email = user.email || null;
+        } catch (e) { /* member may have deleted their account */ }
+      }
+      const act = activity[seatUid] || {};
+      members.push({
+        uid: seatUid,
+        email,
+        isOwner: seatUid === g.ownerUid,
+        isRestricted: restricted.includes(seatUid),
+        scansUsed: Number(act.scans) || 0,
+        lastScanAt: act.lastAt ? act.lastAt.toMillis() : null,
+      });
+    }
+
+    return {
+      groupId: ent.familyGroupId,
+      isOwner,
+      maxSeats: 4,
+      members,
+    };
+  }
+);
+
+/*
+ * Restrict or unrestrict a family member. Owner only.
+ * data: { seatUid, restricted: boolean }
+ */
+exports.restrictFamilySeat = onCall(
+  { region: "us-central1", timeoutSeconds: 30, memory: "256MiB" },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign-in required.");
+    const data = request.data || {};
+    if (!data.seatUid) throw new HttpsError("invalid-argument", "seatUid required.");
+
+    const ent = await getEntitlement(db, uid);
+    if (!ent || !ent.familyGroupId) {
+      throw new HttpsError("failed-precondition", "No family group found.");
+    }
+
+    try {
+      const result = await restrictFamilySeat(
+        db, ent.familyGroupId, uid, data.seatUid, !!data.restricted
+      );
+      return result;
+    } catch (e) {
+      throw new HttpsError("failed-precondition", e.message);
+    }
+  }
+);
+
+/*
+ * Remove (kick) a family member. Owner only.
+ * data: { seatUid }
+ */
+exports.removeFamilySeat = onCall(
+  { region: "us-central1", timeoutSeconds: 30, memory: "256MiB" },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign-in required.");
+    const data = request.data || {};
+    if (!data.seatUid) throw new HttpsError("invalid-argument", "seatUid required.");
+
+    const ent = await getEntitlement(db, uid);
+    if (!ent || !ent.familyGroupId) {
+      throw new HttpsError("failed-precondition", "No family group found.");
+    }
+
+    try {
+      const result = await removeFamilySeat(db, ent.familyGroupId, uid, data.seatUid);
+      return result;
+    } catch (e) {
+      throw new HttpsError("failed-precondition", e.message);
+    }
   }
 );

@@ -33,6 +33,22 @@ data class FamilyInfo(
     val maxSeats: Int
 )
 
+data class FamilyMember(
+    val uid: String,
+    val email: String?,
+    val isOwner: Boolean,
+    val isRestricted: Boolean,
+    val scansUsed: Int,
+    val lastScanAt: Long?
+)
+
+data class FamilyDetails(
+    val groupId: String,
+    val isOwner: Boolean,
+    val maxSeats: Int,
+    val members: List<FamilyMember>
+)
+
 object QuotaRepository {
 
     private const val TAG = "411_QuotaRepository"
@@ -137,6 +153,125 @@ object QuotaRepository {
             ok
         } catch (e: Exception) {
             Log.w(TAG, "inviteFamilySeat failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Get detailed family group info for the admin board.
+     * Returns null on any failure.
+     */
+    suspend fun getFamilyDetails(): FamilyDetails? = withContext(Dispatchers.IO) {
+        try {
+            val idToken = AuthManager.currentIdToken() ?: return@withContext null
+
+            val payload = JSONObject().apply {
+                put("data", JSONObject())
+            }
+            val requestBody = payload.toString()
+                .toRequestBody("application/json; charset=utf-8".toMediaType())
+
+            val request = Request.Builder()
+                .url("https://us-central1-scanner-4ea67.cloudfunctions.net/getFamilyDetails")
+                .post(requestBody)
+                .header("Authorization", "Bearer $idToken")
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val body = response.body?.string()
+            response.close()
+
+            if (!response.isSuccessful || body.isNullOrEmpty()) return@withContext null
+
+            val result = JSONObject(body).optJSONObject("result") ?: return@withContext null
+            val membersJson = result.optJSONArray("members")
+            val members = mutableListOf<FamilyMember>()
+            if (membersJson != null) {
+                for (i in 0 until membersJson.length()) {
+                    val m = membersJson.getJSONObject(i)
+                    members.add(
+                        FamilyMember(
+                            uid = m.optString("uid"),
+                            email = m.optString("email").takeIf { it.isNotEmpty() },
+                            isOwner = m.optBoolean("isOwner"),
+                            isRestricted = m.optBoolean("isRestricted"),
+                            scansUsed = m.optInt("scansUsed"),
+                            lastScanAt = m.optLong("lastScanAt").takeIf { it > 0 }
+                        )
+                    )
+                }
+            }
+
+            FamilyDetails(
+                groupId = result.optString("groupId"),
+                isOwner = result.optBoolean("isOwner"),
+                maxSeats = result.optInt("maxSeats", 4),
+                members = members
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "getFamilyDetails failed: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Restrict or unrestrict a family member. Returns true on success.
+     */
+    suspend fun restrictFamilySeat(seatUid: String, restricted: Boolean): Boolean =
+        withContext(Dispatchers.IO) {
+            try {
+                val idToken = AuthManager.currentIdToken() ?: return@withContext false
+
+                val payload = JSONObject().apply {
+                    put("data", JSONObject().apply {
+                        put("seatUid", seatUid)
+                        put("restricted", restricted)
+                    })
+                }
+                val requestBody = payload.toString()
+                    .toRequestBody("application/json; charset=utf-8".toMediaType())
+
+                val request = Request.Builder()
+                    .url("https://us-central1-scanner-4ea67.cloudfunctions.net/restrictFamilySeat")
+                    .post(requestBody)
+                    .header("Authorization", "Bearer $idToken")
+                    .build()
+
+                val response = httpClient.newCall(request).execute()
+                val ok = response.isSuccessful
+                response.close()
+                ok
+            } catch (e: Exception) {
+                Log.w(TAG, "restrictFamilySeat failed: ${e.message}")
+                false
+            }
+        }
+
+    /**
+     * Remove (kick) a family member. Returns true on success.
+     */
+    suspend fun removeFamilySeat(seatUid: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val idToken = AuthManager.currentIdToken() ?: return@withContext false
+
+            val payload = JSONObject().apply {
+                put("data", JSONObject().apply { put("seatUid", seatUid) })
+            }
+            val requestBody = payload.toString()
+                .toRequestBody("application/json; charset=utf-8".toMediaType())
+
+            val request = Request.Builder()
+                .url("https://us-central1-scanner-4ea67.cloudfunctions.net/removeFamilySeat")
+                .post(requestBody)
+                .header("Authorization", "Bearer $idToken")
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            val ok = response.isSuccessful
+            response.close()
+            ok
+        } catch (e: Exception) {
+            Log.w(TAG, "removeFamilySeat failed: ${e.message}")
             false
         }
     }
