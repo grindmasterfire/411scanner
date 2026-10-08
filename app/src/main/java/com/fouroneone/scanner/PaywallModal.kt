@@ -140,7 +140,7 @@ fun PaywallModal(
             Spacer(modifier = Modifier.height(10.dp))
 
             Text(
-                text = "Weekly Free Scan Used",
+                text = "Out of Scans",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -150,7 +150,7 @@ fun PaywallModal(
             Spacer(modifier = Modifier.height(4.dp))
 
             Text(
-                text = "You've used your free weekly scan. Pick a plan for a bucket of diagnostic scans.",
+                text = "You've used your scans for now. Pick a plan for a bucket of diagnostic scans.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
