@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.text.SimpleDateFormat
@@ -71,7 +72,13 @@ object QuotaManager {
      * Flow emitting the real-time quota entitlement state.
      */
     fun getQuotaStatusFlow(context: Context): Flow<QuotaStatus> {
-        return context.quotaDataStore.data.map { prefs ->
+        // Combine DataStore with auth state: signing in, out, or switching
+        // accounts must refresh the badge. DataStore alone never re-emits
+        // on auth change, which left the old account's status on screen.
+        return combine(
+            context.quotaDataStore.data,
+            AuthManager.userState
+        ) { prefs, _ ->
             val tester = isTesterUnlimited()
             val rentalActive = isRentalActive(prefs)
             val week = getWeekKey()
