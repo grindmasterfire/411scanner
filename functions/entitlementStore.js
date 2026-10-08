@@ -152,6 +152,24 @@ async function checkEntitlement(db, uid) {
   if (!ent) return { allowed: true, tier: "free" };
   const bucket = await resolveBucket(db, uid, ent);
   if (!bucket) return { allowed: true, tier: "free" };
+
+  // Family restriction: blocked members cannot scan at all.
+  if (bucket.isFamily) {
+    const restricted = Array.isArray(bucket.data.restrictedSeats)
+      ? bucket.data.restrictedSeats
+      : [];
+    if (restricted.includes(uid)) {
+      return {
+        allowed: false,
+        tier: "family",
+        reason: "restricted",
+        scansAllowed: 0,
+        scansUsed: 0,
+        topUpScans: 0,
+      };
+    }
+  }
+
   const used = await maybeResetBucket(db, bucket.ref, bucket.data);
   const scansAllowed = Number(bucket.data.scansAllowed) || 0;
   const topUpScans = Number(bucket.data.topUpScans) || 0;

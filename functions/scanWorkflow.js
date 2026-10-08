@@ -102,6 +102,12 @@ async function executeScan(
 
   const entitlement = await checkEntitlement(db, uid);
   if (!entitlement.allowed) {
+    if (entitlement.reason === "restricted") {
+      throw new HttpsError(
+        "permission-denied",
+        "Your family admin has restricted scanning for your account."
+      );
+    }
     throw new HttpsError(
       "resource-exhausted",
       "You've used all your scans for this billing period."
