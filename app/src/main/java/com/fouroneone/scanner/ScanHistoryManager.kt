@@ -33,7 +33,7 @@ object ScanHistoryManager {
             targetName = report.consumerCard.targetName,
             developerOrEntity = report.consumerCard.developerOrEntity,
             score = report.consumerCard.actionMeterScore,
-            badge = report.consumerCard.actionVerdictBadge,
+            badge = report.consumerCard.verdictLabel,
             timestamp = System.currentTimeMillis(),
             rawJson = rawJson
         )
