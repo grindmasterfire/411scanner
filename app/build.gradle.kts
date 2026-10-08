@@ -50,11 +50,18 @@ android {
   buildTypes {
     release {
       isCrunchPngs = false
-      isMinifyEnabled = false
+      isMinifyEnabled = true
+      isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    debug {
+      signingConfig = signingConfigs.getByName("debugConfig")
+      // Test minification impact on size; disable if it breaks debugging
+      isMinifyEnabled = true
+      isShrinkResources = true
+      proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+    }
   }
 
   compileOptions {
@@ -122,13 +129,15 @@ dependencies {
 
   // implementation(libs.androidx.navigation.compose)
 
-  implementation(libs.androidx.room.ktx)
-  implementation(libs.androidx.room.runtime)
+  // Removed: unused (AI runs server-side via Cloud Functions)
+  // implementation(libs.androidx.room.ktx)
+  // implementation(libs.androidx.room.runtime)
 
   // implementation(libs.coil.compose)
 
   implementation(libs.converter.moshi)
-  implementation(libs.firebase.ai)
+  // Removed: unused (AI runs server-side via Cloud Functions)
+  // implementation(libs.firebase.ai)
 
   // Uncomment to use Firestore:
   // implementation(libs.firebase.firestore)
@@ -182,6 +191,7 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
 
-  "ksp"(libs.androidx.room.compiler)
+  // Removed: room not used
+  // "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }
