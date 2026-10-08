@@ -233,7 +233,16 @@ exports.deepDive = onCall(
       );
     }
 
-    await consumeDeepDive(db, uid);
+    // The credit is committed transactionally before any AI work begins.
+    // If the race was lost (or the bank emptied since the gate), abort now —
+    // nothing was spent and nothing was deducted.
+    const diveConsume = await consumeDeepDive(db, uid);
+    if (!diveConsume.consumed) {
+      throw new HttpsError(
+        "resource-exhausted",
+        "Deep dive requires a top-up credit."
+      );
+    }
 
     const requestId =
       createScanRequestId();
