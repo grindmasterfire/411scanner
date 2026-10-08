@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -72,6 +73,7 @@ fun QuotaHeaderBadge(
     ) {
         Box(
             modifier = Modifier
+                .weight(1f, fill = false)
                 .clip(RoundedCornerShape(20.dp))
                 .background(bgColor)
                 .padding(horizontal = 12.dp, vertical = 6.dp)
@@ -89,7 +91,10 @@ fun QuotaHeaderBadge(
                     text = label,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
-                    color = textColor
+                    color = textColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
             }
         }
