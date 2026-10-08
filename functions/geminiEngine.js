@@ -88,6 +88,43 @@ const PASS2_MODEL =
 const MODEL_NAME = PASS1_MODEL;
 const MAX_GROUNDING_RETRIES = Number(process.env.MAX_GROUNDING_RETRIES) || 5;
 
+/*
+ * Hardening (2026-10-08): transient provider errors (503/429/timeout) and
+ * malformed Pass-2 JSON are retryable. They must not kill a scan outright —
+ * especially in Pass 2, where Pass 1's grounded dossier already exists and
+ * throwing would waste the research spend. Grounding-verification failures
+ * keep their own separate retry budget (MAX_GROUNDING_RETRIES); API errors
+ * never consume it.
+ */
+function isTransientProviderError(error) {
+  const msg = String((error && error.message) || "").toLowerCase();
+  return (
+    msg.includes("503") ||
+    msg.includes("500") ||
+    msg.includes("429") ||
+    msg.includes("timeout") ||
+    msg.includes("timed out") ||
+    msg.includes("unavailable") ||
+    msg.includes("overloaded") ||
+    msg.includes("econnreset") ||
+    msg.includes("etimedout") ||
+    msg.includes("socket hang up") ||
+    msg.includes("fetch failed") ||
+    msg.includes("resource_exhausted") ||
+    msg.includes("quota")
+  );
+}
+
+function isJsonParseError(error) {
+  return String((error && error.message) || "").includes(
+    "Gemini returned invalid JSON"
+  );
+}
+
+function backoff(attempt) {
+  return new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+}
+
 const MANDATORY_GROUNDING_INSTRUCTION = `
 MANDATORY 411 GROUNDING REQUIREMENT:
 
@@ -614,24 +651,39 @@ Do not generate Deep Dive.`;
     requestPrompt,
     attemptNumber
   ) {
-    const result =
-      await researchModel.generateContent([
-        requestPrompt,
-        imagePart,
-      ]);
+    /*
+     * Transient API errors get their own retry budget with backoff.
+     * A 503 on attempt 1 must not burn a grounding-verification retry
+     * or kill the scan — the research hasn't happened yet.
+     */
+    let lastError = null;
+    for (let apiAttempt = 0; apiAttempt < 3; apiAttempt++) {
+      try {
+        const result =
+          await researchModel.generateContent([
+            requestPrompt,
+            imagePart,
+          ]);
 
-    const telemetry =
-      buildAttemptTelemetry(
-        result.response,
-        attemptNumber,
-        "research"
-      );
+        const telemetry =
+          buildAttemptTelemetry(
+            result.response,
+            attemptNumber,
+            "research"
+          );
 
-    researchAttempts.push(
-      telemetry
-    );
+        researchAttempts.push(
+          telemetry
+        );
 
-    return result.response;
+        return result.response;
+      } catch (err) {
+        lastError = err;
+        if (!isTransientProviderError(err) || apiAttempt === 2) throw err;
+        await backoff(apiAttempt);
+      }
+    }
+    throw lastError;
   }
 
   let researchResponse =
@@ -721,15 +773,35 @@ Instructions:
 - No claim in the consumer narrative may be stronger than its matching Technical 411 evidence state. The receipt is the ceiling for the claim.
 - For solicitation recognition, describe the solicitation pattern independently of confirmed actor identity.`;
 
-  const synthesisResult =
-    await synthesisModel
-      .generateContent([
-        synthesisPrompt,
-        imagePart,
-      ]);
-
-  const synthesisResponse =
-    synthesisResult.response;
+  /*
+   * Pass 2 synthesis with retry. Pass 1's grounded dossier already exists —
+   * a transient 503 or a malformed JSON blob must not waste that research
+   * spend. Retry transient API errors with backoff; on malformed JSON,
+   * re-prompt with an explicit JSON-only instruction and try again.
+   * Non-transient, non-parse errors (auth, config) throw immediately.
+   */
+  let synthesisResponse = null;
+  let lastSynthesisError = null;
+  for (let synAttempt = 0; synAttempt < 3 && !synthesisResponse; synAttempt++) {
+    if (synAttempt > 0) await backoff(synAttempt - 1);
+    try {
+      const synthesisResult =
+        await synthesisModel.generateContent([
+          synAttempt === 0
+            ? synthesisPrompt
+            : `${synthesisPrompt}\n\nCRITICAL: return ONLY valid JSON. No prose, no markdown fences, no commentary.`,
+          imagePart,
+        ]);
+      // Validate the JSON now: a malformed response is a retryable
+      // failure, not a scan-killer. The dossier still exists.
+      safeParseGeminiJson(synthesisResult.response.text());
+      synthesisResponse = synthesisResult.response;
+    } catch (err) {
+      lastSynthesisError = err;
+      if (!isTransientProviderError(err) && !isJsonParseError(err)) throw err;
+    }
+  }
+  if (!synthesisResponse) throw lastSynthesisError;
 
   const pass2Telemetry =
     buildAttemptTelemetry(
@@ -860,4 +932,5 @@ Instructions:
 
 module.exports = {
   analyzeImageWithGemini,
+  isTransientProviderError,
 };

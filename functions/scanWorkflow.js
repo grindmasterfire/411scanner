@@ -41,7 +41,7 @@ const {
 const { getHistoricalResearchContext } =
   require("./historicalResearchContext");
 
-const { analyzeImageWithGemini } = require("./geminiEngine");
+const { analyzeImageWithGemini, isTransientProviderError } = require("./geminiEngine");
 const { persistFreshScanResult } = require("./scanResultPersistence");
 const { resolveAllLinks } = require("./linkResolver");
 const {
@@ -328,19 +328,10 @@ async function executeScan(
      * T03 — Provider failure resilience.
      * Gemini 503 / 429 / timeout must not burn user entitlements.
      * Return "unavailable" so the client can offer a free retry.
+     * Uses the shared transient-error classifier from geminiEngine
+     * (covers 500/503/429/timeout/reset/hangup/fetch-failed).
      */
-    const msg =
-      (error?.message || "").toLowerCase();
-    const isProviderFailure =
-      msg.includes("503") ||
-      msg.includes("429") ||
-      msg.includes("unavailable") ||
-      msg.includes("overloaded") ||
-      msg.includes("resource_exhausted") ||
-      msg.includes("quota") ||
-      msg.includes("econnreset") ||
-      msg.includes("etimedout") ||
-      msg.includes("socket hang up");
+    const isProviderFailure = isTransientProviderError(error);
 
     if (isProviderFailure || error?.groundingRejected) {
       throw new HttpsError(
