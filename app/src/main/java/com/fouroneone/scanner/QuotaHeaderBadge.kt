@@ -51,7 +51,16 @@ fun QuotaHeaderBadge(
             MaterialTheme.colorScheme.tertiaryContainer,
             MaterialTheme.colorScheme.onTertiaryContainer,
             Icons.Default.LockClock,
-            "SUBSCRIPTION ACTIVE"
+            // Real subscriber bucket from the server ("23/30 SCANS").
+            // Falls back to the generic label when the fetch hasn't
+            // landed yet (rental passes and offline).
+            quotaStatus.serverQuota?.let { sq ->
+                when {
+                    sq.remaining > 0 -> "${sq.remaining}/${sq.scansAllowed} SCANS"
+                    sq.topUpScans > 0 -> "${sq.topUpScans} TOP-UP SCANS LEFT"
+                    else -> "SUBSCRIPTION EXHAUSTED"
+                }
+            } ?: "SUBSCRIPTION ACTIVE"
         )
         quotaStatus.remainingScans > 0 -> Quadruple(
             MaterialTheme.colorScheme.secondaryContainer,

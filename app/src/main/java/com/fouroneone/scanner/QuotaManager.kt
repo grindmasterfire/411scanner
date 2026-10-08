@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -24,7 +25,8 @@ data class QuotaStatus(
     val isTesterUnlimited: Boolean = false,
     val rentalExpiryTimestamp: Long = 0L,
     val remainingScans: Int = 1,
-    val isUnlimited: Boolean = false
+    val isUnlimited: Boolean = false,
+    val serverQuota: ServerQuota? = null
 )
 
 /**
@@ -75,10 +77,18 @@ object QuotaManager {
         // Combine DataStore with auth state: signing in, out, or switching
         // accounts must refresh the badge. DataStore alone never re-emits
         // on auth change, which left the old account's status on screen.
+        // Server quota is fetched for signed-in paid users so the badge
+        // can show the real bucket ("23/30") instead of a placeholder.
+        val serverQuotaFlow: Flow<ServerQuota?> =
+            AuthManager.userState.mapLatest {
+                if (isTesterUnlimited()) null
+                else QuotaRepository.fetchServerQuota()
+            }
         return combine(
             context.quotaDataStore.data,
-            AuthManager.userState
-        ) { prefs, _ ->
+            AuthManager.userState,
+            serverQuotaFlow
+        ) { prefs, _, serverQuota ->
             val tester = isTesterUnlimited()
             val rentalActive = isRentalActive(prefs)
             val week = getWeekKey()
@@ -95,7 +105,8 @@ object QuotaManager {
                 isTesterUnlimited = tester,
                 rentalExpiryTimestamp = prefs[KEY_RENTAL_EXPIRY] ?: 0L,
                 remainingScans = remaining,
-                isUnlimited = unlimited
+                isUnlimited = unlimited,
+                serverQuota = serverQuota
             )
         }
     }

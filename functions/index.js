@@ -31,6 +31,7 @@ const {
 
 const {
   getEntitlement,
+  checkEntitlement,
   checkDeepDiveEntitlement,
   consumeDeepDive,
   grantEntitlement,
@@ -560,5 +561,30 @@ exports.linkFamilySeat = onCall(
     }
     const result = await linkFamilySeat(db, ent.familyGroupId, uid, data.seatUid);
     return { linked: true, ...result };
+  }
+);
+
+/*
+ * Return the caller's subscription quota status for the badge/account UI.
+ * Free tier returns { tier: "free" } with no bucket. Paid tiers return
+ * scansAllowed, scansUsed, remaining, and topUpScans.
+ */
+exports.getQuotaStatus = onCall(
+  { region: "us-central1", timeoutSeconds: 30, memory: "256MiB" },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign-in required.");
+    const result = await checkEntitlement(db, uid);
+    if (result.tier === "free") {
+      return { tier: "free" };
+    }
+    const remaining = Math.max(0, (result.scansAllowed || 0) - (result.scansUsed || 0));
+    return {
+      tier: result.tier,
+      scansAllowed: result.scansAllowed || 0,
+      scansUsed: result.scansUsed || 0,
+      remaining,
+      topUpScans: result.topUpScans || 0,
+    };
   }
 );
