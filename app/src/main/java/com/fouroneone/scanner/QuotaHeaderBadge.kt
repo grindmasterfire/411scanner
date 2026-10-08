@@ -62,7 +62,7 @@ fun QuotaHeaderBadge(
             MaterialTheme.colorScheme.errorContainer,
             MaterialTheme.colorScheme.onErrorContainer,
             Icons.Default.Bolt,
-            "0/${quotaStatus.maxWeeklyScans} SCANS • WEEKLY QUOTA REACHED"
+            "WEEKLY QUOTA REACHED"
         )
     }
 
