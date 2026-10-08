@@ -79,7 +79,7 @@ object ScanRepository {
      * Raw transport for one scan request. Throws ScanFailureException with
      * the user-facing 5-digit code on HTTP errors.
      */
-    private fun executeScanRequest(
+    private suspend fun executeScanRequest(
         base64Image: String,
         ocrText: String
     ): String {
@@ -132,7 +132,7 @@ object ScanRepository {
             throw ScanFailureException(code5, ScanErrorCodes.messageFor(code5))
         }
 
-        responseBodyString
+        return responseBodyString
     }
 
     /**
