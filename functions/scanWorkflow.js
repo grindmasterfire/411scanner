@@ -484,7 +484,28 @@ async function executeScan(
   };
   })();
 
-  await consumeScan(db, uid);
+  /*
+   * The scan already ran: the ledger write must land. Transaction
+   * contention is transient — retry the deduction (not the scan) with
+   * backoff. quota_exhausted needs no retry (nothing left to deduct).
+   */
+  let consumeResult = await consumeScan(db, uid);
+  for (
+    let attempt = 0;
+    attempt < 3 &&
+    !consumeResult.consumed &&
+    consumeResult.reason === "error";
+    attempt++
+  ) {
+    await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
+    consumeResult = await consumeScan(db, uid);
+  }
+  if (!consumeResult.consumed) {
+    console.warn(
+      `[scan] ledger consume failed (${consumeResult.reason}); ` +
+        `scan ${requestId} served but uncounted.`
+    );
+  }
   return __result;
 }
 
