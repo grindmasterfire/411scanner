@@ -195,14 +195,17 @@ exports.deepDive = onCall(
     // before any cache lookup or Gemini call, so malformed requests never
     // burn credits while every delivered result costs exactly 1.
     let uid = null;
+    let isTester = false;
     try {
       const h = (request.rawRequest && request.rawRequest.headers && request.rawRequest.headers.authorization) || "";
       if (h.startsWith("Bearer ")) {
         const decoded = await admin.auth().verifyIdToken(h.slice(7));
         uid = decoded.uid;
+        // TESTING ONLY: sudo bypasses deep-dive top-up requirement.
+        isTester = decoded.email && decoded.email.toLowerCase() === "grindmasterfire@gmail.com";
       }
     } catch (e) { uid = null; }
-    const ddEntitlement = await checkDeepDiveEntitlement(db, uid);
+    const ddEntitlement = await checkDeepDiveEntitlement(db, uid, isTester);
     if (!ddEntitlement.allowed) {
       throw new HttpsError(
         "resource-exhausted",
@@ -240,7 +243,7 @@ exports.deepDive = onCall(
     // If the race was lost (or the bank emptied since the gate), abort now —
     // nothing was spent and nothing was deducted. Transient contention gets
     // a few retries first; only a definitive refusal aborts the dive.
-    let diveConsume = await consumeDeepDive(db, uid);
+    let diveConsume = await consumeDeepDive(db, uid, isTester);
     for (
       let attempt = 0;
       attempt < 3 &&
@@ -249,7 +252,7 @@ exports.deepDive = onCall(
       attempt++
     ) {
       await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
-      diveConsume = await consumeDeepDive(db, uid);
+      diveConsume = await consumeDeepDive(db, uid, isTester);
     }
     if (!diveConsume.consumed) {
       throw new HttpsError(
