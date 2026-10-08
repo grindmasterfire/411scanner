@@ -112,7 +112,7 @@ async function executeScan(
    * Request identity belongs to this invocation, not the intelligence
    * it returns. Cache hits therefore still receive unique receipts.
    */
-  const requestId = createScanRequestId();
+  const requestId = data.clientRequestId || createScanRequestId();
 
   /*
    * Exact cache identity remains image-byte only. OCR variance must
@@ -458,7 +458,7 @@ async function executeScan(
       }
     );
 
-  return {
+  const scanResult = {
     report,
     cache: {
       hit: false,
@@ -473,6 +473,21 @@ async function executeScan(
     identityHistory:
       persisted.identityHistory,
   };
+
+  // Store the full result for resumable scans. If the client's HTTP
+  // request is interrupted, getScanResult(requestId) returns this.
+  try {
+    await db.collection("scan_results").doc(requestId).set({
+      ...scanResult,
+      requestId,
+      uid,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    console.warn("[scan] result store failed:", e.message);
+  }
+
+  return scanResult;
   })();
 
   /*

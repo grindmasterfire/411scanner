@@ -669,6 +669,32 @@ exports.inviteFamilySeat = onCall(
 );
 
 /*
+ * Get a scan result by requestId. For resumable scans: if the client's
+ * HTTP request was interrupted, poll this endpoint until the server
+ * finishes and writes the receipt. Returns null if not ready yet.
+ * data: { requestId }
+ */
+exports.getScanResult = onCall(
+  { region: "us-central1", timeoutSeconds: 30, memory: "256MiB" },
+  async (request) => {
+    const data = request.data || {};
+    const requestId = data.requestId;
+    if (!requestId) throw new HttpsError("invalid-argument", "requestId required.");
+
+    try {
+      const snap = await db.collection("scan_results").doc(requestId).get();
+      if (!snap.exists) return { ready: false };
+      const resultData = snap.data();
+      delete resultData.createdAt;
+      return { ready: true, result: resultData };
+    } catch (e) {
+      console.warn("[getScanResult] read failed:", e.message);
+      return { ready: false };
+    }
+  }
+);
+
+/*
  * Get family group details for the admin board. Returns seats with
  * per-member activity (scan count, last scan time), restriction status,
  * and owner flag. Only members can call; only the owner gets emails.

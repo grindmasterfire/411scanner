@@ -62,17 +62,75 @@ object ScanRepository {
         base64Image: String,
         ocrText: String = ""
     ): String = withContext(Dispatchers.IO) {
+        // Generate a client requestId for resumable scans. If the HTTP
+        // request is interrupted (navigated away, connection dropped),
+        // we poll getScanResult until the server finishes.
+        val clientRequestId = java.util.UUID.randomUUID().toString()
+
         try {
-            executeScanRequest(base64Image, ocrText)
+            executeScanRequest(base64Image, ocrText, clientRequestId)
         } catch (e: ScanFailureException) {
             throw e
         } catch (e: IOException) {
-            // No connectivity (or dropped mid-request): the user sees the
-            // 5-digit code and its sentence, never a raw transport error.
+            // Transport failed — the server may still be processing.
+            // Poll for the result instead of losing the scan.
+            Log.w(TAG, "Scan transport failed, polling for result: $clientRequestId")
+            val result = pollForScanResult(clientRequestId)
+            if (result != null) return@withContext result
+
             Log.e(TAG, "Scan transport failure", e)
             val code5 = ScanErrorCodes.forTransportError(e)
             throw ScanFailureException(code5, ScanErrorCodes.messageFor(code5))
         }
+    }
+
+    /**
+     * Poll getScanResult until the server finishes or timeout.
+     * Returns the result JSON string, or null on timeout.
+     */
+    private suspend fun pollForScanResult(
+        requestId: String,
+        maxWaitMs: Long = 300_000, // 5 minutes
+        intervalMs: Long = 5_000   // 5 seconds
+    ): String? = withContext(Dispatchers.IO) {
+        val start = System.currentTimeMillis()
+        while (System.currentTimeMillis() - start < maxWaitMs) {
+            try {
+                val idToken = AuthManager.currentIdToken()
+                val payload = JSONObject().apply {
+                    put("data", JSONObject().apply {
+                        put("requestId", requestId)
+                    })
+                }
+                val requestBody = payload.toString()
+                    .toRequestBody("application/json; charset=utf-8".toMediaType())
+
+                val reqBuilder = Request.Builder()
+                    .url("https://us-central1-scanner-4ea67.cloudfunctions.net/getScanResult")
+                    .post(requestBody)
+                if (idToken != null) {
+                    reqBuilder.header("Authorization", "Bearer $idToken")
+                }
+                val request = reqBuilder.build()
+
+                val response = httpClient.newCall(request).execute()
+                val body = response.body?.string()
+                response.close()
+
+                if (response.isSuccessful && !body.isNullOrEmpty()) {
+                    val result = JSONObject(body).optJSONObject("result")
+                    if (result != null && result.optBoolean("ready")) {
+                        val scanResult = result.optJSONObject("result")
+                        // Return the full scan result JSON for parsing
+                        return@withContext scanResult?.toString()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Poll failed, retrying: ${e.message}")
+            }
+            kotlinx.coroutines.delay(intervalMs)
+        }
+        null
     }
 
     /**
@@ -81,7 +139,8 @@ object ScanRepository {
      */
     private suspend fun executeScanRequest(
         base64Image: String,
-        ocrText: String
+        ocrText: String,
+        clientRequestId: String
     ): String {
         val payload = JSONObject().apply {
             put("data", JSONObject().apply {
@@ -94,6 +153,9 @@ object ScanRepository {
                  * and the server owns all reuse/identity decisions.
                  */
                 put("ocrText", ocrText)
+
+                // Client-generated ID for resumable scans.
+                put("clientRequestId", clientRequestId)
             })
         }
 
