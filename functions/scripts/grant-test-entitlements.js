@@ -16,10 +16,11 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 
 // fire's test matrix (2026-10-08)
+// TESTING ONLY — remove these grants before production launch.
 const GRANTS = [
-  { email: "lenardbrisco@gmail.com", tier: "pro", period: "monthly" },
-  { email: "briscoleonard@gmail.com", tier: "family", period: "monthly" },
-  { email: "iminethatcrypt1979@gmail.com", tier: "rental", period: "weekly" },
+  { email: "lenardbrisco@gmail.com", tier: "pro", period: "monthly", topUps: 20 },
+  { email: "briscoleonard@gmail.com", tier: "family", period: "monthly", topUps: 25 },
+  { email: "iminethatcrypt1979@gmail.com", tier: "rental", period: "weekly", topUps: 10 },
 ];
 
 async function main() {
@@ -28,6 +29,22 @@ async function main() {
       const user = await admin.auth().getUserByEmail(g.email);
       await grantEntitlement(db, user.uid, g.tier, g.period);
       console.log(`GRANTED: ${g.email} -> ${g.tier}/${g.period}`);
+
+      // Dummy top-ups for deep dive testing.
+      if (g.topUps) {
+        const ent = await db.collection("entitlements").doc(user.uid).get();
+        const data = ent.exists ? ent.data() : {};
+        let bucketRef;
+        if (data.familyGroupId) {
+          bucketRef = db.collection("familyGroups").doc(data.familyGroupId);
+        } else {
+          bucketRef = db.collection("entitlements").doc(user.uid);
+        }
+        await bucketRef.update({
+          topUpScans: admin.firestore.FieldValue.increment(g.topUps),
+        });
+        console.log(`  +${g.topUps} top-ups`);
+      }
     } catch (e) {
       console.log(`FAILED: ${g.email} — ${e.message}`);
     }

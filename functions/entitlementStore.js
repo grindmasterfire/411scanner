@@ -55,6 +55,10 @@ const MAX_FAMILY_SEATS = 4;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const PERIOD_MS = { weekly: 7 * DAY_MS, monthly: 30 * DAY_MS, annual: 365 * DAY_MS };
 
+// TESTING ONLY — remove before production launch.
+// The sudo/tester account bypasses top-up requirements for deep dives.
+const TESTER_EMAIL = "grindmasterfire@gmail.com";
+
 /*
  * Grant table: tier -> period -> total scans for the billing period.
  * Every (tier, period) pair NOT listed here is rejected at grant time.
@@ -273,6 +277,14 @@ async function consumeScan(db, uid) {
  * consumeScan). Returns whether a credit is available.
  */
 async function checkDeepDiveEntitlement(db, uid) {
+  // TESTING ONLY: sudo bypasses the top-up requirement.
+  try {
+    const user = await require("firebase-admin").auth().getUser(uid);
+    if (user.email && user.email.toLowerCase() === TESTER_EMAIL) {
+      return { allowed: true, topUpScans: 999999, isTester: true };
+    }
+  } catch (e) { /* fall through to normal check */ }
+
   const ent = await getEntitlement(db, uid);
   if (!ent) return { allowed: false, topUpScans: 0 };
   const bucket = await resolveBucket(db, uid, ent);
@@ -293,6 +305,13 @@ async function checkDeepDiveEntitlement(db, uid) {
  */
 async function consumeDeepDive(db, uid) {
   if (!uid) return { consumed: false, reason: "no_uid" };
+  // TESTING ONLY: sudo never depletes the bank.
+  try {
+    const user = await require("firebase-admin").auth().getUser(uid);
+    if (user.email && user.email.toLowerCase() === TESTER_EMAIL) {
+      return { consumed: true, isTester: true };
+    }
+  } catch (e) { /* fall through to normal consume */ }
   try {
     return await db.runTransaction(async (tx) => {
       const entSnap = await tx.get(db.collection(COLLECTION).doc(uid));
