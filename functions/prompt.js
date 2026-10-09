@@ -974,6 +974,24 @@ Do not promote a developer, publisher, registrar, host, CDN, payment processor, 
 
 For material attribution facts, emit an evidence receipt using a specific field path such as attribution.operator_name, domain_registration.registrar, or infrastructure.asn.
 
+PROBE-MEASURED INFRASTRUCTURE RECEIPTS
+
+The server injects deterministic network measurements into this prompt under the NETWORK PROBE MEASUREMENTS heading. These values were measured by the server — they are not model estimates. Emit an evidence receipt for each of the following whenever the probe context supplies the value:
+
+infrastructure.ip_addresses — finding: list the resolved IP addresses. status: not_researched if not in probe context.
+
+infrastructure.mail_servers — finding: list each mail exchange hostname. status: not_researched if not in probe context.
+
+infrastructure.dmarc_record — finding: the full DMARC record string. status: not_researched if not in probe context.
+
+infrastructure.spf_record — finding: the full SPF record string. status: not_researched if not in probe context.
+
+infrastructure.tracking_ids — finding: list each tracking ID found (e.g. "GA4: G-XXXXXXXX"). status: not_researched if not in probe context.
+
+infrastructure.subdomains — finding: list discovered subdomains. status: not_researched if not in probe context.
+
+For all probe-measured receipts: set status to not_researched (not verified) because the values come from server measurement, not from your live grounded web research. Set source_url to empty string. Set authority to "Network Probe" and subject to the measured domain.
+
 Absence of a verified license is not proof that a target is unlicensed.
 
 Do not use affirmative terms such as unlicensed when the evidence state is only not_found, unresolved, or not_researched. Use language such as license not verified or no matching license found in the researched authority when accurate.

@@ -75,6 +75,11 @@ const {
   normalizeTechnicalEvidence,
 } = require("./technicalLedgerEvidence");
 
+// WHY: these three governors were built but never wired. The prior wiring
+// attempt (0196982) was reverted because it called enforceTechnicalEvidencePrecision
+// with the ledger instead of the report — the function takes a report and
+// accesses report.technical_ledger internally, so it silently no-oped.
+// Fixed here: each called with the correct argument type.
 const {
   enforceTechnicalEvidencePrecision,
 } = require("./technicalEvidencePrecision");
@@ -870,20 +875,25 @@ Instructions:
    * provider-grounded evidence from Pass 1 before scoring or
    * persistence.
    */
+  // WHY: pass the full verification object, not just .sources — so
+  // normalizeTechnicalEvidence can extract groundedSupports for semantic
+  // binding in bindTechnicalEvidenceSources. Passing only .sources made
+  // groundedSupports always [] and killed Inspect Source on most receipts.
   await normalizeTechnicalEvidence(
     parsedData,
     pass1FinalVerification
   );
 
-  /*
-   * Apply the precision governors to the Technical 411 ledger.
-   * These were built to keep facts, evidence certainty, and regulatory
-   * claims inside their evidence boundaries. Order: facts first (structural),
-   * then evidence certainty, then regulatory specificity.
-   */
+  // Apply precision governors after grounding normalization.
+  // WHY argument types matter:
+  //   enforceTechnicalFactPrecision takes the LEDGER directly
+  //   enforceTechnicalEvidencePrecision takes the full REPORT (accesses .technical_ledger inside)
+  //   enforceRegulatoryEvidencePrecision takes the LEDGER directly
+  // Prior wiring (0196982, reverted 4ebfaed) passed ledger to enforceTechnicalEvidencePrecision
+  // — it silently no-oped every scan. Fixed: pass parsedData (full report).
   if (parsedData.technical_ledger) {
     enforceTechnicalFactPrecision(parsedData.technical_ledger);
-    enforceTechnicalEvidencePrecision(parsedData.technical_ledger);
+    enforceTechnicalEvidencePrecision(parsedData);
     enforceRegulatoryEvidencePrecision(parsedData.technical_ledger);
   }
 

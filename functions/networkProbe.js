@@ -621,18 +621,19 @@ async function runNetworkProbe(linkEvidence, candidateDomain) {
     const subdomains =
       subR.status === "fulfilled" ? subR.value : null;
 
-    // ASN org via Team Cymru — needs an IP, so resolve first
-    // Fix 4: Also capture IPs for probe output
+    // ASN org via Team Cymru — needs an IP, so resolve first.
+    // WHY: capture all resolved IPs here so ip_addresses is populated from
+    // the same DNS lookup rather than requiring a separate resolution pass.
     let asnOrg = null;
-    let ipAddresses = [];
+    let resolvedIps = [];
     try {
       const addrs = await withTimeout(
         dns.lookup(domain, { all: true }),
         PER_CHECK_TIMEOUT_MS,
         "dns"
       ).catch(() => null);
-      if (addrs) {
-        ipAddresses = addrs.map(a => a.address).filter(Boolean);
+      if (addrs && addrs.length > 0) {
+        resolvedIps = addrs.map((a) => a.address).filter(Boolean);
       }
       const ipv4 = addrs?.find((a) => a.family === 4)?.address;
       if (ipv4) {
@@ -652,11 +653,10 @@ async function runNetworkProbe(linkEvidence, candidateDomain) {
       domain_age_days: ageDays,
       final_url: hosting ? hosting.final_url : null,
       // Raw forensic collectors — ZachXBT style, no fluff
+      ip_addresses: resolvedIps,
       mail_servers: mx,
       dmarc_spf: dmarcSpf,
       tracking_ids: tracking,
-      asn_org: asnOrg,
-      ip_addresses: ipAddresses,
       asn_org: asnOrg,
       subdomains: subdomains,
     };
@@ -690,6 +690,11 @@ function probeContextBlock(probe) {
   // Raw forensic collectors — presented as observed, no interpretation.
   // Defensive: truncate and sanitize to avoid prompt injection or overflow.
   try {
+    // WHY: IPs are now collected in the same DNS lookup used for ASN; surface
+    // them here so Gemini can reference them and emit infrastructure receipts.
+    if (probe.ip_addresses && probe.ip_addresses.length > 0) {
+      lines.push(`- Resolved IPs: ${probe.ip_addresses.slice(0, 8).join(", ")}`);
+    }
     if (probe.mail_servers && Array.isArray(probe.mail_servers)) {
       const mx = probe.mail_servers.slice(0, 5).map((m) =>
         `${m.exchange || "?"} (pri ${m.priority ?? "?"})`
@@ -745,37 +750,62 @@ function applyMeasuredLedger(report, probe) {
   }
   telemetry.domain_age_days =
     typeof probe.domain_age_days === "number" ? probe.domain_age_days : null;
-  // Stamp raw forensic measurements into infrastructure for receipt generation
-  // Fix 1: Write to correct schema field names with correct types.
+  // Stamp raw forensic measurements into infrastructure.
+  // WHY: schema and Android both use flat string/string-array fields.
+  // Probe produces nested objects — flatten to the exact field names the
+  // schema defines so Android parsing is never a type mismatch.
   const infra = ledger.infrastructure || (ledger.infrastructure = {});
-  if (probe.mail_servers && !infra.mail_servers) {
-    infra.mail_servers = (probe.mail_servers || [])
-      .map(mx => mx.exchange || "")
-      .filter(Boolean);
-  }
-  if (probe.dmarc_spf && !infra.dmarc_record) {
-    infra.dmarc_record = probe.dmarc_spf.dmarc || "";
-  }
-  if (probe.dmarc_spf && !infra.spf_record) {
-    infra.spf_record = probe.dmarc_spf.spf || "";
-  }
-  if (probe.tracking_ids && !infra.tracking_ids) {
-    infra.tracking_ids = Object.entries(probe.tracking_ids || {})
-      .flatMap(([type, ids]) => (ids || []).map(id => `${type}: ${id}`));
-  }
-  if (probe.asn_org && !infra.asn) {
-    infra.asn = probe.asn_org.asn || "";
-  }
-  if (probe.asn_org && !infra.asn_organization) {
-    infra.asn_organization = probe.asn_org.raw || "";
-  }
-  if (probe.subdomains && !infra.subdomains) {
-    infra.subdomains = probe.subdomains;
-  }
-  // Fix 4: IP addresses — merge with Gemini's if both exist
+
+  // ip_addresses: probe returns string[] from DNS lookup; merge with any IPs
+  // Gemini may have grounded from research — don't clobber if already populated.
   if (probe.ip_addresses && probe.ip_addresses.length > 0) {
     const existing = Array.isArray(infra.ip_addresses) ? infra.ip_addresses : [];
-    infra.ip_addresses = [...new Set([...existing, ...probe.ip_addresses])];
+    const merged = [...new Set([...existing, ...probe.ip_addresses])];
+    infra.ip_addresses = merged;
+  }
+
+  // mail_servers: probe returns [{priority,exchange}]; schema/Android expect string[]
+  if (probe.mail_servers && !infra.mail_servers) {
+    infra.mail_servers = probe.mail_servers
+      .map((mx) => (typeof mx === "string" ? mx : mx.exchange || ""))
+      .filter(Boolean);
+  }
+
+  // dmarc_record / spf_record: probe returns {dmarc,spf}; schema has two separate strings
+  if (probe.dmarc_spf) {
+    if (!infra.dmarc_record && probe.dmarc_spf.dmarc) {
+      infra.dmarc_record = probe.dmarc_spf.dmarc;
+    }
+    if (!infra.spf_record && probe.dmarc_spf.spf) {
+      infra.spf_record = probe.dmarc_spf.spf;
+    }
+  }
+
+  // tracking_ids: probe returns {GA4:[...],GTM:[...]}; schema/Android expect string[]
+  if (probe.tracking_ids && !infra.tracking_ids) {
+    infra.tracking_ids = Object.entries(probe.tracking_ids)
+      .flatMap(([type, ids]) =>
+        (Array.isArray(ids) ? ids : [ids]).map((id) => `${type}: ${id}`)
+      )
+      .filter(Boolean);
+  }
+
+  // asn / asn_organization: probe returns {asn,prefix,country,raw}; schema has two strings
+  if (probe.asn_org) {
+    if (!infra.asn && probe.asn_org.asn) {
+      infra.asn = probe.asn_org.asn;
+    }
+    if (!infra.asn_organization && probe.asn_org.raw) {
+      infra.asn_organization = probe.asn_org.raw;
+    }
+    if (!infra.asn_country && probe.asn_org.country) {
+      infra.asn_country = probe.asn_org.country;
+    }
+  }
+
+  // subdomains: probe already returns string[] — direct write, correct format
+  if (probe.subdomains && !infra.subdomains) {
+    infra.subdomains = probe.subdomains;
   }
   return report;
 }

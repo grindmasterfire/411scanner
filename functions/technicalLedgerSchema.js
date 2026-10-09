@@ -201,21 +201,35 @@ const TECHNICAL_LEDGER_SCHEMA = {
     },
 
     /*
-     * Redirect path evidence. Written by applyRedirectPath() from deterministic
-     * probe data. Optional — not required, populates when redirect data exists.
+     * Deterministic redirect-chain evidence written by applyRedirectPath.
+     * Optional — absent when no link was submitted or resolved.
+     * WHY: must be in schema so Firestore serialization and Android parsers
+     * receive it. Was absent post-revert — Android RedirectPath models exist
+     * but got empty defaults because the field was never in the contract.
      */
     redirect_path: {
       type: "object",
       properties: {
-        submitted_url: { type: "string" },
-        final_url: { type: "string" },
-        final_domain: { type: "string" },
-        hop_count: { type: "integer" },
+        submitted_url:      { type: "string" },
+        normalized_url:     { type: "string" },
+        final_destination:  { type: "string" },
+        final_domain:       { type: "string" },
+        shortener_identity: { type: "string", nullable: true },
         hops: {
           type: "array",
-          items: { type: "string" }
+          items: {
+            type: "object",
+            properties: {
+              url:         { type: "string" },
+              status_code: { type: "integer", nullable: true },
+              hop_index:   { type: "integer" }
+            }
+          }
         },
-        shortener_identified: { type: "string" }
+        tracking_parameters: {
+          type: "array",
+          items: { type: "string" }
+        }
       }
     },
 
