@@ -88,6 +88,10 @@ async function executeScan(
   // verification; server-side entitlement (Loop B) will consume it.
   console.log(`[scan] caller uid: ${uid || "anonymous"}`);
 
+  // WHY: diagnostic log to surface request shape when 50101 fires.
+  // Remove after root cause confirmed.
+  console.log(`[scan] data keys: ${Object.keys(data || {}).join(",") || "(none)"} | imageBase64 present: ${!!(data && data.imageBase64)} | imageBase64 length: ${(data && data.imageBase64) ? String(data.imageBase64).length : 0}`);
+
   /*
    * Request identity belongs to this invocation, not the intelligence
    * it returns. Declared here so both the scan IIFE and the post-scan
