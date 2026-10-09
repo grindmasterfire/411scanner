@@ -20,6 +20,7 @@
  */
 
 const { HttpsError } = require("firebase-functions/v2/https");
+const admin = require("firebase-admin");
 const { buildCacheKey } = require("./cacheKey");
 
 const {
@@ -487,11 +488,12 @@ async function executeScan(
   // Store the full result for resumable scans. If the client's HTTP
   // request is interrupted, getScanResult(requestId) returns this.
   try {
+    const db = admin.firestore();
     await db.collection("scan_results").doc(requestId).set({
       ...scanResult,
       requestId,
       uid,
-      createdAt: FieldValue.serverTimestamp(),
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
   } catch (e) {
     console.warn("[scan] result store failed:", e.message);
