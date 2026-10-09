@@ -677,22 +677,42 @@ function probeContextBlock(probe) {
     lines.push(`- Domain age: ${probe.domain_age_days} days (via RDAP)`);
   }
   if (probe.final_url) lines.push(`- Final landing URL: ${probe.final_url}`);
-  // Raw forensic collectors — presented as observed, no interpretation
-  if (probe.mail_servers) {
-    lines.push(`- Mail servers (MX): ${JSON.stringify(probe.mail_servers)}`);
-  }
-  if (probe.dmarc_spf) {
-    if (probe.dmarc_spf.dmarc) lines.push(`- DMARC: ${probe.dmarc_spf.dmarc}`);
-    if (probe.dmarc_spf.spf) lines.push(`- SPF: ${probe.dmarc_spf.spf}`);
-  }
-  if (probe.tracking_ids) {
-    lines.push(`- Tracking IDs: ${JSON.stringify(probe.tracking_ids)}`);
-  }
-  if (probe.asn_org) {
-    lines.push(`- ASN: ${probe.asn_org.raw} (via Team Cymru)`);
-  }
-  if (probe.subdomains) {
-    lines.push(`- Subdomains (CT): ${probe.subdomains.slice(0, 20).join(", ")}${probe.subdomains.length > 20 ? ` (+${probe.subdomains.length - 20} more)` : ""}`);
+  // Raw forensic collectors — presented as observed, no interpretation.
+  // Defensive: truncate and sanitize to avoid prompt injection or overflow.
+  try {
+    if (probe.mail_servers && Array.isArray(probe.mail_servers)) {
+      const mx = probe.mail_servers.slice(0, 5).map((m) =>
+        `${m.exchange || "?"} (pri ${m.priority ?? "?"})`
+      ).join(", ");
+      if (mx) lines.push(`- Mail servers (MX): ${mx}`);
+    }
+    if (probe.dmarc_spf) {
+      if (probe.dmarc_spf.dmarc) {
+        const d = String(probe.dmarc_spf.dmarc).slice(0, 200);
+        lines.push(`- DMARC: ${d}`);
+      }
+      if (probe.dmarc_spf.spf) {
+        const s = String(probe.dmarc_spf.spf).slice(0, 200);
+        lines.push(`- SPF: ${s}`);
+      }
+    }
+    if (probe.tracking_ids && typeof probe.tracking_ids === "object") {
+      const parts = [];
+      for (const [k, v] of Object.entries(probe.tracking_ids).slice(0, 5)) {
+        const ids = Array.isArray(v) ? v.slice(0, 3).join(",") : String(v).slice(0, 50);
+        parts.push(`${k}:${ids}`);
+      }
+      if (parts.length) lines.push(`- Tracking IDs: ${parts.join(" ")}`);
+    }
+    if (probe.asn_org && probe.asn_org.raw) {
+      lines.push(`- ASN: ${String(probe.asn_org.raw).slice(0, 100)}`);
+    }
+    if (probe.subdomains && Array.isArray(probe.subdomains)) {
+      const subs = probe.subdomains.slice(0, 10).join(", ");
+      if (subs) lines.push(`- Subdomains (CT): ${subs}${probe.subdomains.length > 10 ? " (+" + (probe.subdomains.length - 10) + " more)" : ""}`);
+    }
+  } catch (_) {
+    // Never let forensic enrichment break the prompt
   }
   lines.push("");
   return lines.join("\n");
