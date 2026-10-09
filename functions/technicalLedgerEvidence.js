@@ -343,6 +343,18 @@ function normalizeEvidenceReceipt(receipt, groundedSourceMap) {
     normalized.finding = conformFindingToStatus(normalized.status, normalized.finding, normalized.field);
   }
 
+  // Final fallback: if source_url is still empty but Gemini proposed a valid
+  // non-redirect URL, preserve it. The status field is the security gate —
+  // not the presence of a URL. Inspect Source is a "go check this yourself"
+  // link, not a verified claim.
+  if (!normalized.source_url) {
+    const proposedUrl = normalizeUrl(receipt?.source_url);
+    if (proposedUrl && isUsableGroundedSourceUrl(proposedUrl)) {
+      normalized.source_url = proposedUrl;
+      normalized.source_title = clean(receipt?.source_title) || normalized.source_title;
+    }
+  }
+
   return normalized;
 }
 
