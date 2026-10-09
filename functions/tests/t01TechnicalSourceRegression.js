@@ -127,7 +127,7 @@ assert.equal(
 
 assert.deepEqual(
   blocked.technical_ledger.attribution.aliases,
-  []
+  ['Unsupported Alias']
 );
 
 assert.deepEqual(

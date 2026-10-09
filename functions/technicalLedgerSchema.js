@@ -198,6 +198,21 @@ const TECHNICAL_LEDGER_SCHEMA = {
       items: {
         type: "string"
       }
+    },
+
+    /*
+     * Consumer / complaint / review evidence. Separated from regulatory_record:
+     * BBB and Trustpilot are NOT regulatory records. Optional — populates
+     * when Gemini finds consumer evidence.
+     */
+    consumer_evidence: {
+      type: "object",
+      properties: {
+        bbb_record: { type: "string" },
+        trustpilot: { type: "string" },
+        complaint_pattern: { type: "string" },
+        review_spread: { type: "string" }
+      }
     }
   },
 

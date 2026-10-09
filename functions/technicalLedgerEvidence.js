@@ -244,12 +244,16 @@ function isSecRegistrationClaim(receipt) {
 
 /**
  * A non-verified receipt must never read as an established fact.
- * unresolved / not_researched findings are prefixed so the body matches the badge.
+ * For unresolved / not_researched, replace contradictory findings with
+ * clean neutral statements. Never prefix a specific unverified claim
+ * with a hedge — that creates "Unverified: maintains an A+ rating"
+ * contradictions.
  */
-function conformFindingToStatus(status, finding) {
+function conformFindingToStatus(status, finding, field) {
   const f = clean(finding);
   if (!f) return f;
   const lower = f.toLowerCase();
+  const fieldLabel = clean(field) || "This field";
   if (status === "unresolved") {
     if (
       lower.startsWith("unverified") ||
@@ -259,11 +263,12 @@ function conformFindingToStatus(status, finding) {
     ) {
       return f;
     }
-    return `Unverified (live grounding did not confirm this): ${f}`;
+    // Strip the specific unverified claim; state what was attempted.
+    return `${fieldLabel} could not be verified via live grounding this scan.`;
   }
   if (status === "not_researched") {
     if (lower.startsWith("not researched")) return f;
-    return `Not researched this scan: ${f}`;
+    return `Not researched this scan: ${fieldLabel}.`;
   }
   return f;
 }
@@ -335,7 +340,7 @@ function normalizeEvidenceReceipt(receipt, groundedSourceMap) {
     normalized.status !== "not_applicable" &&
     normalized.status !== "not_found"
   ) {
-    normalized.finding = conformFindingToStatus(normalized.status, normalized.finding);
+    normalized.finding = conformFindingToStatus(normalized.status, normalized.finding, normalized.field);
   }
 
   return normalized;

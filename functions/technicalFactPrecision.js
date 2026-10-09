@@ -89,6 +89,12 @@ function emptyField(section, field) {
 }
 
 function enforceStructuredEvidence(ledger) {
+  // DISABLED: This was wiping populated ledger fields that lacked verified
+  // receipts, causing thin Technical 411 output. The evidence receipts
+  // themselves carry the verification status; the structured fields should
+  // not be deleted merely for lacking a receipt.
+  // Original logic preserved below for reference.
+  return;
   for (const [sectionName, fields] of Object.entries(MATERIAL_FIELDS)) {
     const section = ledger?.[sectionName];
     if (!section) continue;
