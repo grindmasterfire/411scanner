@@ -161,11 +161,31 @@ const TECHNICAL_LEDGER_SCHEMA = {
           type: "string"
         },
 
+        ftc_record: {
+          type: "string"
+        }
+      },
+
+      required: [
+        "license_status",
+        "ftc_record"
+      ]
+    },
+
+    /*
+     * Consumer / complaint / review evidence. Separated from regulatory_record
+     * per canonical spec: BBB and Trustpilot are NOT regulatory records.
+     * Consumer sentiment is evidence, not arithmetic.
+     */
+    consumer_evidence: {
+      type: "object",
+
+      properties: {
         bbb_record: {
           type: "string"
         },
 
-        ftc_record: {
+        trustpilot: {
           type: "string"
         },
 
@@ -175,15 +195,81 @@ const TECHNICAL_LEDGER_SCHEMA = {
 
         review_spread: {
           type: "string"
+        },
+
+        complaint_boards: {
+          type: "array",
+          items: {
+            type: "string"
+          }
         }
       },
 
       required: [
-        "license_status",
         "bbb_record",
-        "ftc_record",
+        "trustpilot",
         "complaint_pattern",
         "review_spread"
+      ]
+    },
+
+    /*
+     * Redirect / action-link path. Deterministic solicitation-path evidence
+     * from linkResolver.js. A shortener must not become the end of the
+     * investigation merely because search grounding cannot index the final
+     * destination.
+     */
+    redirect_path: {
+      type: "object",
+
+      properties: {
+        submitted_url: {
+          type: "string"
+        },
+
+        normalized_url: {
+          type: "string"
+        },
+
+        hops: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              url: { type: "string" },
+              status_code: { type: "integer", nullable: true },
+              hop_index: { type: "integer" }
+            }
+          }
+        },
+
+        final_destination: {
+          type: "string"
+        },
+
+        final_domain: {
+          type: "string"
+        },
+
+        shortener_identity: {
+          type: "string",
+          nullable: true
+        },
+
+        tracking_parameters: {
+          type: "array",
+          items: {
+            type: "string"
+          }
+        }
+      },
+
+      required: [
+        "submitted_url",
+        "normalized_url",
+        "hops",
+        "final_destination",
+        "final_domain"
       ]
     },
 
@@ -208,6 +294,8 @@ const TECHNICAL_LEDGER_SCHEMA = {
     "network_telemetry",
     "monetization",
     "regulatory_record",
+    "consumer_evidence",
+    "redirect_path",
     "evidence_receipts",
     "technical_flags"
   ]

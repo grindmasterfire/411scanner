@@ -43,6 +43,14 @@ object TechnicalLedgerParser {
                 TechnicalEvidenceParser
                     .parseRegulatory(ledger),
 
+            consumerEvidence =
+                TechnicalEvidenceParser
+                    .parseConsumerEvidence(ledger),
+
+            redirectPath =
+                TechnicalEvidenceParser
+                    .parseRedirectPath(ledger),
+
             evidenceReceipts =
                 TechnicalEvidenceParser
                     .parseReceipts(

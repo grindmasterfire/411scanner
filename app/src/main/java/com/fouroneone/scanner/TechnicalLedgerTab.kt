@@ -67,6 +67,8 @@ fun TechnicalLedgerTab(
     val nt = technicalLedger.networkTelemetry
     val mon = technicalLedger.monetization
     val reg = technicalLedger.regulatoryRecord
+    val consumer = technicalLedger.consumerEvidence
+    val redirectPath = technicalLedger.redirectPath
     val receipts = technicalLedger.evidenceReceipts
     val badges = consumerCard?.classificationBadges ?: emptyList()
 
@@ -170,31 +172,84 @@ fun TechnicalLedgerTab(
             )
         }
 
-        LedgerCard("REGULATORY & COMPLAINT RECORD") {
+        LedgerCard("REGULATORY RECORD") {
             LedgerItem(
                 "License Status",
                 reg.licenseStatus.evidenceStateLabel()
             )
 
             LedgerItem(
+                "FTC Record",
+                reg.ftcRecord.evidenceStateLabel()
+            )
+        }
+
+        LedgerCard("CONSUMER EVIDENCE") {
+            LedgerItem(
                 "BBB Record",
-                reg.bbbRecord.evidenceStateLabel()
+                consumer.bbbRecord.evidenceStateLabel()
             )
 
             LedgerItem(
-                "FTC Record",
-                reg.ftcRecord.evidenceStateLabel()
+                "Trustpilot",
+                consumer.trustpilot.evidenceStateLabel()
             )
 
             LedgerItem(
                 "Complaint Pattern",
-                reg.complaintPattern.evidenceStateLabel()
+                consumer.complaintPattern.evidenceStateLabel()
             )
 
             LedgerItem(
                 "Review Spread",
-                reg.reviewSpread.evidenceStateLabel()
+                consumer.reviewSpread.evidenceStateLabel()
             )
+
+            if (consumer.complaintBoards.isNotEmpty()) {
+                LedgerItem(
+                    "Complaint Boards",
+                    consumer.complaintBoards.joinToString(", ")
+                )
+            }
+        }
+
+        if (redirectPath != null && redirectPath.submittedUrl.isNotBlank()) {
+            LedgerCard("REDIRECT PATH") {
+                LedgerItem(
+                    "Submitted URL",
+                    redirectPath.submittedUrl
+                )
+
+                if (redirectPath.hops.isNotEmpty()) {
+                    redirectPath.hops.forEach { hop ->
+                        LedgerItem(
+                            "Hop ${hop.hopIndex + 1}${hop.statusCode?.let { " ($it)" } ?: ""}",
+                            hop.url.ifBlank { "—" }
+                        )
+                    }
+                }
+
+                LedgerItem(
+                    "Final Destination",
+                    redirectPath.finalDestination.ifBlank { "Not established" }
+                )
+
+                LedgerItem(
+                    "Final Domain",
+                    redirectPath.finalDomain.ifBlank { "Not established" }
+                )
+
+                redirectPath.shortenerIdentity?.let {
+                    LedgerItem("Shortener", it)
+                }
+
+                if (redirectPath.trackingParameters.isNotEmpty()) {
+                    LedgerItem(
+                        "Tracking Parameters",
+                        redirectPath.trackingParameters.joinToString(", ")
+                    )
+                }
+            }
         }
 
         TechnicalAttributionSection(

@@ -68,10 +68,33 @@ data class Monetization(
 
 data class RegulatoryRecord(
     val licenseStatus: String = "",
-    val bbbRecord: String = "",
     val ftcRecord: String = "",
     val complaintPattern: String = "",
     val reviewSpread: String = ""
+)
+
+data class ConsumerEvidence(
+    val bbbRecord: String = "",
+    val trustpilot: String = "",
+    val complaintPattern: String = "",
+    val reviewSpread: String = "",
+    val complaintBoards: List<String> = emptyList()
+)
+
+data class RedirectHop(
+    val url: String = "",
+    val statusCode: Int? = null,
+    val hopIndex: Int = 0
+)
+
+data class RedirectPath(
+    val submittedUrl: String = "",
+    val normalizedUrl: String = "",
+    val hops: List<RedirectHop> = emptyList(),
+    val finalDestination: String = "",
+    val finalDomain: String = "",
+    val shortenerIdentity: String? = null,
+    val trackingParameters: List<String> = emptyList()
 )
 
 data class TechnicalEvidenceReceipt(
@@ -98,6 +121,10 @@ data class TechnicalLedger(
         Monetization(),
     val regulatoryRecord: RegulatoryRecord =
         RegulatoryRecord(),
+    val consumerEvidence: ConsumerEvidence =
+        ConsumerEvidence(),
+    val redirectPath: RedirectPath? =
+        null,
     val evidenceReceipts: List<TechnicalEvidenceReceipt> =
         emptyList(),
     val technicalFlags: List<String> =

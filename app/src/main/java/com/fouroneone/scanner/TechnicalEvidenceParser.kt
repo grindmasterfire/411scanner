@@ -82,8 +82,6 @@ object TechnicalEvidenceParser {
         return RegulatoryRecord(
             licenseStatus =
                 source.optString("license_status", ""),
-            bbbRecord =
-                source.optString("bbb_record", ""),
             ftcRecord =
                 source.optString("ftc_record", ""),
             complaintPattern =
@@ -96,6 +94,74 @@ object TechnicalEvidenceParser {
                     "review_spread",
                     ""
                 )
+        )
+    }
+
+    fun parseConsumerEvidence(
+        ledger: JSONObject
+    ): ConsumerEvidence {
+        val source =
+            ledger.optJSONObject("consumer_evidence")
+                ?: JSONObject()
+
+        // Backwards compat: fall back to regulatory_record for old reports
+        val legacy =
+            ledger.optJSONObject("regulatory_record")
+                ?: JSONObject()
+
+        return ConsumerEvidence(
+            bbbRecord =
+                source.optString("bbb_record", "")
+                    .ifEmpty { legacy.optString("bbb_record", "") },
+            trustpilot =
+                source.optString("trustpilot", ""),
+            complaintPattern =
+                source.optString("complaint_pattern", "")
+                    .ifEmpty { legacy.optString("complaint_pattern", "") },
+            reviewSpread =
+                source.optString("review_spread", "")
+                    .ifEmpty { legacy.optString("review_spread", "") },
+            complaintBoards =
+                TechnicalJsonValues.stringList(
+                    source.optJSONArray("complaint_boards")
+                )
+        )
+    }
+
+    fun parseRedirectPath(
+        ledger: JSONObject
+    ): RedirectPath? {
+        val source =
+            ledger.optJSONObject("redirect_path")
+                ?: return null
+
+        val hopsArray = source.optJSONArray("hops")
+        val hops = mutableListOf<RedirectHop>()
+        if (hopsArray != null) {
+            for (i in 0 until hopsArray.length()) {
+                val h = hopsArray.optJSONObject(i) ?: continue
+                hops.add(
+                    RedirectHop(
+                        url = h.optString("url", ""),
+                        statusCode = if (h.isNull("status_code")) null
+                                     else h.optInt("status_code"),
+                        hopIndex = h.optInt("hop_index", i)
+                    )
+                )
+            }
+        }
+
+        return RedirectPath(
+            submittedUrl = source.optString("submitted_url", ""),
+            normalizedUrl = source.optString("normalized_url", ""),
+            hops = hops,
+            finalDestination = source.optString("final_destination", ""),
+            finalDomain = source.optString("final_domain", ""),
+            shortenerIdentity = source.optString("shortener_identity", "")
+                .ifEmpty { null },
+            trackingParameters = TechnicalJsonValues.stringList(
+                source.optJSONArray("tracking_parameters")
+            )
         )
     }
 

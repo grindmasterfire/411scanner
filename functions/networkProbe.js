@@ -735,10 +735,73 @@ function applyMeasuredLedger(report, probe) {
   return report;
 }
 
+/**
+ * Governance write: stamp deterministic redirect-path evidence into the
+ * report's technical_ledger.redirect_path. Uses the linkEvidence from
+ * linkResolver.js — the actual redirect chain as observed by the server.
+ * A shortener must not become the end of the investigation.
+ */
+function applyRedirectPath(report, linkEvidence) {
+  if (!report) return report;
+  const ledger = report.technical_ledger || (report.technical_ledger = {});
+
+  const links = linkEvidence?.links;
+  if (!Array.isArray(links) || links.length === 0) {
+    // No links resolved — leave redirect_path absent, do not fabricate
+    return report;
+  }
+
+  // Use the primary (first) resolved link for the canonical redirect path
+  const primary = links[0];
+  if (!primary || !primary.submittedUrl) return report;
+
+  const hops = (primary.hops || []).map((h, idx) => ({
+    url: h.to || h.from || "",
+    status_code: typeof h.status === "number" ? h.status : null,
+    hop_index: idx,
+  }));
+
+  // Detect shortener from submitted URL host
+  let shortener = null;
+  try {
+    const host = new URL(primary.submittedUrl).hostname.toLowerCase();
+    const SHORTENERS = new Set([
+      "bit.ly", "t.co", "tinyurl.com", "goo.gl", "ow.ly", "is.gd",
+      "buff.ly", "adf.ly", "bl.ink", "lnkd.in", "cutt.ly", "rb.gy",
+    ]);
+    if (SHORTENERS.has(host)) shortener = host;
+  } catch (_) {}
+
+  // Extract tracking parameters from final URL
+  let trackingParams = [];
+  try {
+    const finalUrl = new URL(primary.finalUrl || primary.submittedUrl);
+    trackingParams = [...finalUrl.searchParams.keys()].filter((k) => {
+      const lower = k.toLowerCase();
+      return lower.startsWith("utm_") || lower.includes("aff") ||
+             lower.includes("ref") || lower.includes("track") ||
+             lower.includes("cid") || lower === "fbclid" || lower === "gclid";
+    });
+  } catch (_) {}
+
+  ledger.redirect_path = {
+    submitted_url: primary.submittedUrl,
+    normalized_url: primary.finalUrl || primary.submittedUrl,
+    hops,
+    final_destination: primary.finalUrl || primary.submittedUrl,
+    final_domain: primary.finalDomain || "",
+    shortener_identity: shortener,
+    tracking_parameters: trackingParams,
+  };
+
+  return report;
+}
+
 module.exports = {
   runNetworkProbe,
   probeContextBlock,
   applyMeasuredLedger,
+  applyRedirectPath,
   // test hooks
   _pickTarget: pickTarget,
   _classifyCert: classifyCert,

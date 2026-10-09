@@ -47,6 +47,7 @@ const { resolveAllLinks } = require("./linkResolver");
 const {
   runNetworkProbe,
   applyMeasuredLedger,
+  applyRedirectPath,
 } = require("./networkProbe");
 
 const {
@@ -365,6 +366,8 @@ async function executeScan(
 
   // Server-owned infrastructure measurement (governance write).
   applyMeasuredLedger(report, probe);
+  // Deterministic redirect-path evidence (governance write).
+  applyRedirectPath(report, linkEvidence);
   let probeStatus = probe && probe.measured ? "measured" : "bypassed_no_target";
 
   // Fallback: OCR gave no URL, but the model identified a domain. Probe that
