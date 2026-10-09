@@ -256,6 +256,126 @@ fun TechnicalLedgerTab(
             technicalLedger
         )
 
+        // P4: Tracking Identity — only render when data exists
+        val tracking = technicalLedger.trackingIdentity
+        if (tracking.trackingIds.isNotEmpty() ||
+            tracking.affiliateIdentifiers.isNotEmpty() ||
+            tracking.packageHashes.isNotEmpty() ||
+            tracking.sdkFingerprints.isNotEmpty()) {
+            LedgerCard("TRACKING IDENTITY") {
+                tracking.trackingIds.forEach { (name, ids) ->
+                    if (ids.isNotEmpty()) {
+                        LedgerItem(name, ids.joinToString(", "))
+                    }
+                }
+                if (tracking.affiliateIdentifiers.isNotEmpty()) {
+                    LedgerItem(
+                        "Affiliate IDs",
+                        tracking.affiliateIdentifiers.joinToString(", ")
+                    )
+                }
+                if (tracking.packageHashes.isNotEmpty()) {
+                    LedgerItem(
+                        "Package Hashes",
+                        tracking.packageHashes.joinToString(", ")
+                    )
+                }
+                if (tracking.sdkFingerprints.isNotEmpty()) {
+                    LedgerItem(
+                        "SDK Fingerprints",
+                        tracking.sdkFingerprints.joinToString(", ")
+                    )
+                }
+            }
+        }
+
+        // P4: Data Requirements — only render when data exists
+        val dataReq = technicalLedger.dataRequirements
+        if (dataReq.accountRequirement.isNotBlank() ||
+            dataReq.kycRequirement.isNotBlank() ||
+            dataReq.personalDataCollection.isNotBlank() ||
+            dataReq.sensitiveDataCollection.isNotBlank() ||
+            dataReq.appPermissions.isNotEmpty()) {
+            LedgerCard("DATA REQUIREMENTS") {
+                if (dataReq.accountRequirement.isNotBlank()) {
+                    LedgerItem("Account", dataReq.accountRequirement)
+                }
+                if (dataReq.kycRequirement.isNotBlank()) {
+                    LedgerItem("KYC", dataReq.kycRequirement)
+                }
+                if (dataReq.personalDataCollection.isNotBlank()) {
+                    LedgerItem("Personal Data", dataReq.personalDataCollection)
+                }
+                if (dataReq.sensitiveDataCollection.isNotBlank()) {
+                    LedgerItem("Sensitive Data", dataReq.sensitiveDataCollection)
+                }
+                if (dataReq.appPermissions.isNotEmpty()) {
+                    LedgerItem(
+                        "Permissions",
+                        dataReq.appPermissions.joinToString(", ")
+                    )
+                }
+            }
+        }
+
+        // P4: Campaign Continuity — only render when data exists
+        val campaign = technicalLedger.campaignContinuity
+        if (campaign.reusedDomains.isNotEmpty() ||
+            campaign.reusedTrackingIds.isNotEmpty() ||
+            campaign.relatedOffers.isNotEmpty()) {
+            LedgerCard("CAMPAIGN CONTINUITY") {
+                if (campaign.confidence.isNotBlank()) {
+                    LedgerItem("Confidence", campaign.confidence)
+                }
+                if (campaign.reusedDomains.isNotEmpty()) {
+                    LedgerItem(
+                        "Reused Domains",
+                        campaign.reusedDomains.joinToString(", ")
+                    )
+                }
+                if (campaign.reusedTrackingIds.isNotEmpty()) {
+                    LedgerItem(
+                        "Reused Tracking IDs",
+                        campaign.reusedTrackingIds.joinToString(", ")
+                    )
+                }
+                if (campaign.relatedOffers.isNotEmpty()) {
+                    LedgerItem(
+                        "Related Offers",
+                        campaign.relatedOffers.joinToString(", ")
+                    )
+                }
+            }
+        }
+
+        // P4: Blockchain — only render when data exists
+        val chain = technicalLedger.blockchainEvidence
+        if (chain.walletAddresses.isNotEmpty() ||
+            chain.contractAddresses.isNotEmpty() ||
+            chain.chain.isNotBlank() ||
+            chain.tokenEvidence.isNotBlank()) {
+            LedgerCard("BLOCKCHAIN") {
+                if (chain.chain.isNotBlank()) {
+                    LedgerItem("Chain", chain.chain)
+                }
+                if (chain.walletAddresses.isNotEmpty()) {
+                    LedgerItem(
+                        "Wallets",
+                        chain.walletAddresses.joinToString(", ")
+                    )
+                }
+                if (chain.contractAddresses.isNotEmpty()) {
+                    LedgerItem(
+                        "Contracts",
+                        chain.contractAddresses.joinToString(", ")
+                    )
+                }
+                if (chain.tokenEvidence.isNotBlank()) {
+                    LedgerItem("Token Evidence", chain.tokenEvidence)
+                }
+            }
+        }
+
         TechnicalEvidenceSection(
             receipts
         )

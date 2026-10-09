@@ -273,6 +273,118 @@ const TECHNICAL_LEDGER_SCHEMA = {
       ]
     },
 
+    /*
+     * Tracking & technical identity. Deterministic identifiers that link
+     * this solicitation to infrastructure, campaigns, or actors.
+     * Pattern similarity must not be converted into actor identity.
+     */
+    tracking_identity: {
+      type: "object",
+
+      properties: {
+        tracking_ids: {
+          type: "object"
+        },
+
+        affiliate_identifiers: {
+          type: "array",
+          items: { type: "string" }
+        },
+
+        package_hashes: {
+          type: "array",
+          items: { type: "string" }
+        },
+
+        sdk_fingerprints: {
+          type: "array",
+          items: { type: "string" }
+        }
+      },
+
+      required: []
+    },
+
+    /*
+     * Data / account / access requirements. What the solicitation demands
+     * from the user before delivering value.
+     */
+    data_requirements: {
+      type: "object",
+
+      properties: {
+        account_requirement: { type: "string" },
+        kyc_requirement: { type: "string" },
+        personal_data_collection: { type: "string" },
+        sensitive_data_collection: { type: "string" },
+        app_permissions: {
+          type: "array",
+          items: { type: "string" }
+        }
+      },
+
+      required: []
+    },
+
+    /*
+     * Campaign / solicitation continuity. Links this solicitation to prior
+     * or related campaigns. Confidence levels: CONFIRMED, RELATED,
+     * PATTERN_ONLY, UNKNOWN. Never convert similar mechanics into common
+     * ownership.
+     */
+    campaign_continuity: {
+      type: "object",
+
+      properties: {
+        reused_domains: {
+          type: "array",
+          items: { type: "string" }
+        },
+
+        reused_tracking_ids: {
+          type: "array",
+          items: { type: "string" }
+        },
+
+        related_offers: {
+          type: "array",
+          items: { type: "string" }
+        },
+
+        confidence: {
+          type: "string"
+        }
+      },
+
+      required: []
+    },
+
+    /*
+     * Blockchain / Web3 / financial infrastructure. On-chain evidence
+     * where applicable. Do not invent relationships from naming similarity.
+     */
+    blockchain: {
+      type: "object",
+
+      properties: {
+        wallet_addresses: {
+          type: "array",
+          items: { type: "string" }
+        },
+
+        contract_addresses: {
+          type: "array",
+          items: { type: "string" }
+        },
+
+        chain: { type: "string" },
+
+        token_evidence: { type: "string" }
+      },
+
+      required: []
+    },
+
     evidence_receipts: {
       type: "array",
       items:
@@ -296,6 +408,10 @@ const TECHNICAL_LEDGER_SCHEMA = {
     "regulatory_record",
     "consumer_evidence",
     "redirect_path",
+    "tracking_identity",
+    "data_requirements",
+    "campaign_continuity",
+    "blockchain",
     "evidence_receipts",
     "technical_flags"
   ]

@@ -51,6 +51,22 @@ object TechnicalLedgerParser {
                 TechnicalEvidenceParser
                     .parseRedirectPath(ledger),
 
+            trackingIdentity =
+                TechnicalEvidenceParser
+                    .parseTrackingIdentity(ledger),
+
+            dataRequirements =
+                TechnicalEvidenceParser
+                    .parseDataRequirements(ledger),
+
+            campaignContinuity =
+                TechnicalEvidenceParser
+                    .parseCampaignContinuity(ledger),
+
+            blockchainEvidence =
+                TechnicalEvidenceParser
+                    .parseBlockchainEvidence(ledger),
+
             evidenceReceipts =
                 TechnicalEvidenceParser
                     .parseReceipts(

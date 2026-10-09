@@ -205,4 +205,108 @@ object TechnicalEvidenceParser {
 
         return values
     }
+
+    fun parseTrackingIdentity(
+        ledger: JSONObject
+    ): TrackingIdentity {
+        val source =
+            ledger.optJSONObject("tracking_identity")
+                ?: JSONObject()
+
+        val trackingIds = mutableMapOf<String, List<String>>()
+        val idsObj = source.optJSONObject("tracking_ids")
+        if (idsObj != null) {
+            val keys = idsObj.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                trackingIds[k] = TechnicalJsonValues.stringList(
+                    idsObj.optJSONArray(k)
+                )
+            }
+        }
+
+        return TrackingIdentity(
+            trackingIds = trackingIds,
+            affiliateIdentifiers = TechnicalJsonValues.stringList(
+                source.optJSONArray("affiliate_identifiers")
+            ),
+            packageHashes = TechnicalJsonValues.stringList(
+                source.optJSONArray("package_hashes")
+            ),
+            sdkFingerprints = TechnicalJsonValues.stringList(
+                source.optJSONArray("sdk_fingerprints")
+            )
+        )
+    }
+
+    fun parseDataRequirements(
+        ledger: JSONObject
+    ): DataRequirements {
+        val source =
+            ledger.optJSONObject("data_requirements")
+                ?: JSONObject()
+
+        return DataRequirements(
+            accountRequirement =
+                source.optString("account_requirement", ""),
+            kycRequirement =
+                source.optString("kyc_requirement", ""),
+            personalDataCollection =
+                source.optString("personal_data_collection", ""),
+            sensitiveDataCollection =
+                source.optString("sensitive_data_collection", ""),
+            appPermissions =
+                TechnicalJsonValues.stringList(
+                    source.optJSONArray("app_permissions")
+                )
+        )
+    }
+
+    fun parseCampaignContinuity(
+        ledger: JSONObject
+    ): CampaignContinuity {
+        val source =
+            ledger.optJSONObject("campaign_continuity")
+                ?: JSONObject()
+
+        return CampaignContinuity(
+            reusedDomains =
+                TechnicalJsonValues.stringList(
+                    source.optJSONArray("reused_domains")
+                ),
+            reusedTrackingIds =
+                TechnicalJsonValues.stringList(
+                    source.optJSONArray("reused_tracking_ids")
+                ),
+            relatedOffers =
+                TechnicalJsonValues.stringList(
+                    source.optJSONArray("related_offers")
+                ),
+            confidence =
+                source.optString("confidence", "")
+        )
+    }
+
+    fun parseBlockchainEvidence(
+        ledger: JSONObject
+    ): BlockchainEvidence {
+        val source =
+            ledger.optJSONObject("blockchain")
+                ?: JSONObject()
+
+        return BlockchainEvidence(
+            walletAddresses =
+                TechnicalJsonValues.stringList(
+                    source.optJSONArray("wallet_addresses")
+                ),
+            contractAddresses =
+                TechnicalJsonValues.stringList(
+                    source.optJSONArray("contract_addresses")
+                ),
+            chain =
+                source.optString("chain", ""),
+            tokenEvidence =
+                source.optString("token_evidence", "")
+        )
+    }
 }

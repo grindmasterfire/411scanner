@@ -97,6 +97,35 @@ data class RedirectPath(
     val trackingParameters: List<String> = emptyList()
 )
 
+data class TrackingIdentity(
+    val trackingIds: Map<String, List<String>> = emptyMap(),
+    val affiliateIdentifiers: List<String> = emptyList(),
+    val packageHashes: List<String> = emptyList(),
+    val sdkFingerprints: List<String> = emptyList()
+)
+
+data class DataRequirements(
+    val accountRequirement: String = "",
+    val kycRequirement: String = "",
+    val personalDataCollection: String = "",
+    val sensitiveDataCollection: String = "",
+    val appPermissions: List<String> = emptyList()
+)
+
+data class CampaignContinuity(
+    val reusedDomains: List<String> = emptyList(),
+    val reusedTrackingIds: List<String> = emptyList(),
+    val relatedOffers: List<String> = emptyList(),
+    val confidence: String = ""
+)
+
+data class BlockchainEvidence(
+    val walletAddresses: List<String> = emptyList(),
+    val contractAddresses: List<String> = emptyList(),
+    val chain: String = "",
+    val tokenEvidence: String = ""
+)
+
 data class TechnicalEvidenceReceipt(
     val field: String = "",
     val status: String = "not_researched",
@@ -125,6 +154,14 @@ data class TechnicalLedger(
         ConsumerEvidence(),
     val redirectPath: RedirectPath? =
         null,
+    val trackingIdentity: TrackingIdentity =
+        TrackingIdentity(),
+    val dataRequirements: DataRequirements =
+        DataRequirements(),
+    val campaignContinuity: CampaignContinuity =
+        CampaignContinuity(),
+    val blockchainEvidence: BlockchainEvidence =
+        BlockchainEvidence(),
     val evidenceReceipts: List<TechnicalEvidenceReceipt> =
         emptyList(),
     val technicalFlags: List<String> =
