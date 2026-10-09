@@ -160,6 +160,33 @@ const INFRASTRUCTURE_SCHEMA = {
     tls_valid_to: {
       type: "string",
     },
+
+    mail_servers: STRING_ARRAY_SCHEMA,
+
+    dmarc_record: {
+      type: "string",
+    },
+
+    spf_record: {
+      type: "string",
+    },
+
+    tracking_ids: {
+      type: "array",
+      items: {
+        type: "string",
+      },
+    },
+
+    subdomains: STRING_ARRAY_SCHEMA,
+
+    asn_organization: {
+      type: "string",
+    },
+
+    asn_country: {
+      type: "string",
+    },
   },
 
   required: [
