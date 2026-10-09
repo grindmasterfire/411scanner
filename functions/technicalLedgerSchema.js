@@ -283,7 +283,8 @@ const TECHNICAL_LEDGER_SCHEMA = {
 
       properties: {
         tracking_ids: {
-          type: "object"
+          type: "object",
+          description: "Map of tracker name to list of IDs found"
         },
 
         affiliate_identifiers: {
@@ -406,12 +407,6 @@ const TECHNICAL_LEDGER_SCHEMA = {
     "network_telemetry",
     "monetization",
     "regulatory_record",
-    "consumer_evidence",
-    "redirect_path",
-    "tracking_identity",
-    "data_requirements",
-    "campaign_continuity",
-    "blockchain",
     "evidence_receipts",
     "technical_flags"
   ]
