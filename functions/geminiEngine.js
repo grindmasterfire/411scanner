@@ -76,18 +76,6 @@ const {
 } = require("./technicalLedgerEvidence");
 
 const {
-  enforceTechnicalEvidencePrecision,
-} = require("./technicalEvidencePrecision");
-
-const {
-  enforceTechnicalFactPrecision,
-} = require("./technicalFactPrecision");
-
-const {
-  enforceRegulatoryEvidencePrecision,
-} = require("./technicalRegulatoryPrecision");
-
-const {
   measureScanComposition,
 } = require("./scanCompositionMeter");
 
@@ -874,18 +862,6 @@ Instructions:
     parsedData,
     pass1FinalVerification.sources
   );
-
-  /*
-   * Apply the precision governors to the Technical 411 ledger.
-   * These were built to keep facts, evidence certainty, and regulatory
-   * claims inside their evidence boundaries. Order: facts first (structural),
-   * then evidence certainty, then regulatory specificity.
-   */
-  if (parsedData.technical_ledger) {
-    enforceTechnicalFactPrecision(parsedData.technical_ledger);
-    enforceTechnicalEvidencePrecision(parsedData.technical_ledger);
-    enforceRegulatoryEvidencePrecision(parsedData.technical_ledger);
-  }
 
   const floorRaisers =
     extractFloorRaisers(
