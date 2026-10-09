@@ -201,52 +201,13 @@ const TECHNICAL_LEDGER_SCHEMA = {
     },
 
     /*
-     * Deterministic redirect-chain evidence written by applyRedirectPath.
-     * Optional — absent when no link was submitted or resolved.
-     * WHY: must be in schema so Firestore serialization and Android parsers
-     * receive it. Was absent post-revert — Android RedirectPath models exist
-     * but got empty defaults because the field was never in the contract.
+     * redirect_path and consumer_evidence are intentionally excluded from this
+     * Gemini responseSchema. Gemini rejects schemas with nullable nested fields
+     * (documented crash in 30e1ad9). redirect_path is written server-side by
+     * applyRedirectPath() from deterministic probe data — Gemini never produces it.
+     * consumer_evidence is written by Gemini as free text inside evidence_receipts.
+     * Both reach Firestore and Android directly without being in this contract.
      */
-    redirect_path: {
-      type: "object",
-      properties: {
-        submitted_url:      { type: "string" },
-        normalized_url:     { type: "string" },
-        final_destination:  { type: "string" },
-        final_domain:       { type: "string" },
-        shortener_identity: { type: "string", nullable: true },
-        hops: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              url:         { type: "string" },
-              status_code: { type: "integer", nullable: true },
-              hop_index:   { type: "integer" }
-            }
-          }
-        },
-        tracking_parameters: {
-          type: "array",
-          items: { type: "string" }
-        }
-      }
-    },
-
-    /*
-     * Consumer / complaint / review evidence. Separated from regulatory_record:
-     * BBB and Trustpilot are NOT regulatory records. Optional — populates
-     * when Gemini finds consumer evidence.
-     */
-    consumer_evidence: {
-      type: "object",
-      properties: {
-        bbb_record: { type: "string" },
-        trustpilot: { type: "string" },
-        complaint_pattern: { type: "string" },
-        review_spread: { type: "string" }
-      }
-    }
   },
 
   required: [
