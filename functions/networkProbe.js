@@ -622,13 +622,18 @@ async function runNetworkProbe(linkEvidence, candidateDomain) {
       subR.status === "fulfilled" ? subR.value : null;
 
     // ASN org via Team Cymru — needs an IP, so resolve first
+    // Fix 4: Also capture IPs for probe output
     let asnOrg = null;
+    let ipAddresses = [];
     try {
       const addrs = await withTimeout(
         dns.lookup(domain, { all: true }),
         PER_CHECK_TIMEOUT_MS,
         "dns"
       ).catch(() => null);
+      if (addrs) {
+        ipAddresses = addrs.map(a => a.address).filter(Boolean);
+      }
       const ipv4 = addrs?.find((a) => a.family === 4)?.address;
       if (ipv4) {
         asnOrg = await checkAsnOrg(ipv4).catch(() => null);
@@ -650,6 +655,8 @@ async function runNetworkProbe(linkEvidence, candidateDomain) {
       mail_servers: mx,
       dmarc_spf: dmarcSpf,
       tracking_ids: tracking,
+      asn_org: asnOrg,
+      ip_addresses: ipAddresses,
       asn_org: asnOrg,
       subdomains: subdomains,
     };
@@ -677,6 +684,9 @@ function probeContextBlock(probe) {
     lines.push(`- Domain age: ${probe.domain_age_days} days (via RDAP)`);
   }
   if (probe.final_url) lines.push(`- Final landing URL: ${probe.final_url}`);
+  if (probe.ip_addresses && Array.isArray(probe.ip_addresses) && probe.ip_addresses.length > 0) {
+    lines.push(`- Resolved IPs: ${probe.ip_addresses.slice(0, 5).join(", ")}`);
+  }
   // Raw forensic collectors — presented as observed, no interpretation.
   // Defensive: truncate and sanitize to avoid prompt injection or overflow.
   try {
@@ -736,21 +746,36 @@ function applyMeasuredLedger(report, probe) {
   telemetry.domain_age_days =
     typeof probe.domain_age_days === "number" ? probe.domain_age_days : null;
   // Stamp raw forensic measurements into infrastructure for receipt generation
+  // Fix 1: Write to correct schema field names with correct types.
   const infra = ledger.infrastructure || (ledger.infrastructure = {});
   if (probe.mail_servers && !infra.mail_servers) {
-    infra.mail_servers = probe.mail_servers;
+    infra.mail_servers = (probe.mail_servers || [])
+      .map(mx => mx.exchange || "")
+      .filter(Boolean);
   }
-  if (probe.dmarc_spf && !infra.dmarc_spf) {
-    infra.dmarc_spf = probe.dmarc_spf;
+  if (probe.dmarc_spf && !infra.dmarc_record) {
+    infra.dmarc_record = probe.dmarc_spf.dmarc || "";
+  }
+  if (probe.dmarc_spf && !infra.spf_record) {
+    infra.spf_record = probe.dmarc_spf.spf || "";
   }
   if (probe.tracking_ids && !infra.tracking_ids) {
-    infra.tracking_ids = probe.tracking_ids;
+    infra.tracking_ids = Object.entries(probe.tracking_ids || {})
+      .flatMap(([type, ids]) => (ids || []).map(id => `${type}: ${id}`));
   }
-  if (probe.asn_org && !infra.asn_org) {
-    infra.asn_org = probe.asn_org;
+  if (probe.asn_org && !infra.asn) {
+    infra.asn = probe.asn_org.asn || "";
+  }
+  if (probe.asn_org && !infra.asn_organization) {
+    infra.asn_organization = probe.asn_org.raw || "";
   }
   if (probe.subdomains && !infra.subdomains) {
     infra.subdomains = probe.subdomains;
+  }
+  // Fix 4: IP addresses — merge with Gemini's if both exist
+  if (probe.ip_addresses && probe.ip_addresses.length > 0) {
+    const existing = Array.isArray(infra.ip_addresses) ? infra.ip_addresses : [];
+    infra.ip_addresses = [...new Set([...existing, ...probe.ip_addresses])];
   }
   return report;
 }

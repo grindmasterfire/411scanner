@@ -958,6 +958,13 @@ CDN
 TLS issuer
 TLS subject
 TLS validity dates
+mail_servers (from probe context — emit receipt citing measured MX values)
+dmarc_record (from probe context — emit receipt citing measured DMARC)
+spf_record (from probe context — emit receipt citing measured SPF)
+tracking_ids (from probe context — emit receipt listing each tracking ID found)
+subdomains (from probe context — emit receipt listing discovered subdomains)
+
+For receipts derived from probe-injected context rather than live grounded research, set status to "not_researched" (not "verified") so they display with the correct evidence state.
 
 Use empty strings or empty arrays when a structured value is not established.
 

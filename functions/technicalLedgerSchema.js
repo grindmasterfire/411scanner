@@ -201,6 +201,25 @@ const TECHNICAL_LEDGER_SCHEMA = {
     },
 
     /*
+     * Redirect path evidence. Written by applyRedirectPath() from deterministic
+     * probe data. Optional — not required, populates when redirect data exists.
+     */
+    redirect_path: {
+      type: "object",
+      properties: {
+        submitted_url: { type: "string" },
+        final_url: { type: "string" },
+        final_domain: { type: "string" },
+        hop_count: { type: "integer" },
+        hops: {
+          type: "array",
+          items: { type: "string" }
+        },
+        shortener_identified: { type: "string" }
+      }
+    },
+
+    /*
      * Consumer / complaint / review evidence. Separated from regulatory_record:
      * BBB and Trustpilot are NOT regulatory records. Optional — populates
      * when Gemini finds consumer evidence.

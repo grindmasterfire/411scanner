@@ -872,7 +872,7 @@ Instructions:
    */
   await normalizeTechnicalEvidence(
     parsedData,
-    pass1FinalVerification.sources
+    pass1FinalVerification
   );
 
   /*
