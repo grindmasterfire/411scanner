@@ -55,7 +55,8 @@ object ScanExecutionWorkflow {
         val rawResponse =
             ScanRepository.scan(
                 base64Image = base64Image,
-                ocrText = ocrText
+                ocrText = ocrText,
+                context = context
             )
 
         /*
@@ -65,6 +66,21 @@ object ScanExecutionWorkflow {
          * does not treat the scan as delivered until its current parser can
          * successfully construct the production ScanReport.
          */
+        return completeDelivery(context, rawResponse)
+    }
+
+    /**
+     * Complete the delivery transaction for a scan result obtained
+     * without a fresh network request — e.g. resumed via getScanResult
+     * polling after navigation away or process death.
+     *
+     * Same guarantees as execute(): parse, persist, consume quota.
+     * Quota is consumed only after the report validates.
+     */
+    suspend fun completeDelivery(
+        context: Context,
+        rawResponse: String
+    ): String {
         val validatedReport =
             ScanReport.fromJson(rawResponse)
 

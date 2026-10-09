@@ -21,6 +21,7 @@
 
 package com.fouroneone.scanner
 
+import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -60,15 +61,22 @@ object ScanRepository {
      */
     suspend fun scan(
         base64Image: String,
-        ocrText: String = ""
+        ocrText: String = "",
+        context: Context? = null
     ): String = withContext(Dispatchers.IO) {
         // Generate a client requestId for resumable scans. If the HTTP
         // request is interrupted (navigated away, connection dropped),
         // we poll getScanResult until the server finishes.
         val clientRequestId = java.util.UUID.randomUUID().toString()
 
+        // Persist before the network call so even an immediate
+        // interruption is recoverable. Cleared on delivery.
+        context?.let { PendingScanManager.savePending(it, clientRequestId) }
+
         try {
-            executeScanRequest(base64Image, ocrText, clientRequestId)
+            val result = executeScanRequest(base64Image, ocrText, clientRequestId)
+            context?.let { PendingScanManager.clearPending(it) }
+            result
         } catch (e: ScanFailureException) {
             throw e
         } catch (e: IOException) {
@@ -76,12 +84,39 @@ object ScanRepository {
             // Poll for the result instead of losing the scan.
             Log.w(TAG, "Scan transport failed, polling for result: $clientRequestId")
             val result = pollForScanResult(clientRequestId)
-            if (result != null) return@withContext result
+            if (result != null) {
+                context?.let { PendingScanManager.clearPending(it) }
+                return@withContext result
+            }
 
             Log.e(TAG, "Scan transport failure", e)
             val code5 = ScanErrorCodes.forTransportError(e)
             throw ScanFailureException(code5, ScanErrorCodes.messageFor(code5))
         }
+    }
+
+    /**
+     * Resume a scan that was interrupted by navigation away, process
+     * death, or app restart. Returns the result JSON string if the
+     * server finished, null if no pending scan or still processing.
+     *
+     * The pending ID is cleared on successful retrieval so a subsequent
+     * launch does not re-poll a completed scan.
+     */
+    suspend fun resumePendingScan(
+        context: Context,
+        maxWaitMs: Long = 120_000, // 2 minutes — server already had a head start
+        intervalMs: Long = 5_000
+    ): String? = withContext(Dispatchers.IO) {
+        val requestId = PendingScanManager.getPending(context)
+            ?: return@withContext null
+
+        Log.d(TAG, "Resuming pending scan: $requestId")
+        val result = pollForScanResult(requestId, maxWaitMs, intervalMs)
+        if (result != null) {
+            PendingScanManager.clearPending(context)
+        }
+        result
     }
 
     /**

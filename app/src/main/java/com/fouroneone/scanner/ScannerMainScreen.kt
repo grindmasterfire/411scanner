@@ -167,6 +167,38 @@ fun ScannerMainScreen(
         }
     }
 
+    /**
+     * Resumable-scan recovery: if a previous scan was interrupted by
+     * navigation away, process death, or app restart, the request ID
+     * was persisted. Poll getScanResult for the already-computed result
+     * instead of losing the scan the user paid for (ad watch or quota).
+     */
+    var isResuming by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        val pending = PendingScanManager.getPending(context)
+        if (pending != null && scanResult == null) {
+            isResuming = true
+            isLoading = true
+            try {
+                val resumed = ScanRepository.resumePendingScan(context)
+                if (resumed != null) {
+                    val rawResponse =
+                        ScanExecutionWorkflow.completeDelivery(context, resumed)
+                    refreshRecentScans()
+                    scanResult = rawResponse
+                }
+                // Null means still processing or expired — the pending
+                // entry is cleared by the manager when stale. User can
+                // start a fresh scan; quota was never consumed.
+            } catch (e: Exception) {
+                scanError = e.message ?: "Could not resume interrupted scan"
+            } finally {
+                isResuming = false
+                isLoading = false
+            }
+        }
+    }
+
     val photoPickerLauncher =
         rememberLauncherForActivityResult(
             contract =
