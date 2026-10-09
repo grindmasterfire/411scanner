@@ -87,6 +87,13 @@ async function executeScan(
   // verification; server-side entitlement (Loop B) will consume it.
   console.log(`[scan] caller uid: ${uid || "anonymous"}`);
 
+  /*
+   * Request identity belongs to this invocation, not the intelligence
+   * it returns. Declared here so both the scan IIFE and the post-scan
+   * ledger block can reference it. Cache hits still receive unique receipts.
+   */
+  const requestId = data.clientRequestId || createScanRequestId();
+
   const __result = await (async () => {
   const imageBase64 = data.imageBase64;
   const mimeType = data.mimeType || "image/jpeg";
@@ -113,12 +120,6 @@ async function executeScan(
       "You've used all your scans for this billing period."
     );
   }
-
-  /*
-   * Request identity belongs to this invocation, not the intelligence
-   * it returns. Cache hits therefore still receive unique receipts.
-   */
-  const requestId = data.clientRequestId || createScanRequestId();
 
   /*
    * Exact cache identity remains image-byte only. OCR variance must
