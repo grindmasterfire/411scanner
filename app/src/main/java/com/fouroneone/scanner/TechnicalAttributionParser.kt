@@ -146,7 +146,27 @@ object TechnicalAttributionParser {
             tlsValidFrom =
                 source.optString("tls_valid_from", ""),
             tlsValidTo =
-                source.optString("tls_valid_to", "")
+                source.optString("tls_valid_to", ""),
+            mailServers =
+                TechnicalJsonValues.stringList(
+                    source.optJSONArray("mail_servers")
+                ),
+            dmarcRecord =
+                source.optString("dmarc_record", ""),
+            spfRecord =
+                source.optString("spf_record", ""),
+            trackingIds =
+                TechnicalJsonValues.stringList(
+                    source.optJSONArray("tracking_ids")
+                ),
+            subdomains =
+                TechnicalJsonValues.stringList(
+                    source.optJSONArray("subdomains")
+                ),
+            asnOrganization =
+                source.optString("asn_organization", ""),
+            asnCountry =
+                source.optString("asn_country", "")
         )
     }
 }

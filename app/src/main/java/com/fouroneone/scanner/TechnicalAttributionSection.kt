@@ -105,6 +105,10 @@ fun TechnicalAttributionSection(
                     .joinToString("\n"),
             "ASN" to
                 ledger.infrastructure.asn,
+            "ASN Organization" to
+                ledger.infrastructure.asnOrganization,
+            "ASN Country" to
+                ledger.infrastructure.asnCountry,
             "Hosting Provider" to
                 ledger.infrastructure.hostingProvider,
             "CDN" to
@@ -116,7 +120,20 @@ fun TechnicalAttributionSection(
             "TLS Valid From" to
                 ledger.infrastructure.tlsValidFrom,
             "TLS Valid To" to
-                ledger.infrastructure.tlsValidTo
+                ledger.infrastructure.tlsValidTo,
+            "Mail Servers" to
+                ledger.infrastructure.mailServers
+                    .joinToString("\n"),
+            "DMARC Record" to
+                ledger.infrastructure.dmarcRecord,
+            "SPF Record" to
+                ledger.infrastructure.spfRecord,
+            "Tracking IDs" to
+                ledger.infrastructure.trackingIds
+                    .joinToString("\n"),
+            "Subdomains" to
+                ledger.infrastructure.subdomains
+                    .joinToString("\n")
         )
     )
 }

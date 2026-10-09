@@ -48,7 +48,14 @@ data class TechnicalInfrastructure(
     val tlsIssuer: String = "",
     val tlsSubject: String = "",
     val tlsValidFrom: String = "",
-    val tlsValidTo: String = ""
+    val tlsValidTo: String = "",
+    val mailServers: List<String> = emptyList(),
+    val dmarcRecord: String = "",
+    val spfRecord: String = "",
+    val trackingIds: List<String> = emptyList(),
+    val subdomains: List<String> = emptyList(),
+    val asnOrganization: String = "",
+    val asnCountry: String = ""
 )
 
 data class NetworkTelemetry(
