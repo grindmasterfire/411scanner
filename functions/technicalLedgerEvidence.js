@@ -288,18 +288,33 @@ function normalizeEvidenceReceipt(receipt, groundedSourceMap) {
 
   if (normalized.status === "verified" && !groundedSource) {
     normalized.status = "unresolved";
+    // Preserve the original receipt URL — do not wipe the evidence trail.
+    // The client filters unusable URLs from Inspect Source destinations.
+    const originalUrl = normalizeUrl(receipt?.source_url);
+    if (originalUrl && isUsableGroundedSourceUrl(originalUrl)) {
+      normalized.source_url = originalUrl;
+      normalized.source_title = clean(receipt?.source_title) || normalized.source_title;
+    }
   }
 
   // WHY: a retained redirect must never read as verified. If the grounded
   // source did not resolve to a real, inspectable URL (still a redirect, or
-  // empty), the claim is not provider-confirmed. Downgrade and drop the link.
+  // empty), the claim is not provider-confirmed. Downgrade the status but
+  // PRESERVE the source URL — the Android client filters redirect URLs from
+  // Inspect Source destinations. Wiping the URL destroys the evidence trail.
   if (
     normalized.status === "verified" &&
     (!normalized.source_url || isGroundingRedirect(normalized.source_url))
   ) {
     normalized.status = "unresolved";
-    normalized.source_url = "";
-    normalized.source_title = "";
+    // Preserve the original receipt URL if usable; do not wipe the trail.
+    const originalUrl = normalizeUrl(receipt?.source_url);
+    if (originalUrl && isUsableGroundedSourceUrl(originalUrl)) {
+      normalized.source_url = originalUrl;
+      normalized.source_title = clean(receipt?.source_title) || normalized.source_title;
+    }
+    // If the URL is a redirect or empty, keep it as-is (client filters it).
+    // Do NOT wipe source_url/source_title — the evidence trail must survive.
   }
 
   if (

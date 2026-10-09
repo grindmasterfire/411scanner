@@ -117,9 +117,12 @@ assert.equal(
   "unresolved"
 );
 
+// Restoration: the source URL is preserved (not wiped) when downgraded.
+// The Android client filters redirect URLs from Inspect Source destinations.
+// The evidence trail must survive even when the claim is unresolved.
 assert.equal(
   blocked.technical_ledger.evidence_receipts[0].source_url,
-  ""
+  wrapper
 );
 
 assert.deepEqual(
