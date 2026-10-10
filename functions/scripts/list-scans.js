@@ -19,16 +19,42 @@ admin
   .orderBy("createdAt", "desc")
   .limit(limit)
   .get()
-  .then((snap) => {
+  .then(async (snap) => {
     if (snap.empty) {
       console.log("No scans found.");
       process.exit(0);
     }
     console.log(`\nLast ${snap.size} scans:\n`);
-    snap.forEach((doc) => {
+    for (const doc of snap.docs) {
       const d = doc.data();
-      const target = (d.target || d.domain || "unknown").substring(0, 40);
-      const score = d.score ?? "?";
+      let target = "unknown";
+      let score = "?";
+
+      // Try to get target/score from cached report
+      if (d.cacheKey) {
+        try {
+          const cacheDoc = await admin
+            .firestore()
+            .collection("scan_cache")
+            .doc(d.cacheKey)
+            .get();
+          if (cacheDoc.exists) {
+            const report = cacheDoc.data();
+            // Try multiple possible locations for target/domain
+            target =
+              report.target ||
+              report.domain ||
+              report.solicitation_identity?.destination_domain ||
+              report.consumer_card?.entity_name ||
+              "unknown";
+            score = report.score ?? report.consumer_card?.action_meter_score ?? "?";
+            if (typeof target === "string") target = target.substring(0, 40);
+          }
+        } catch (e) {
+          // Ignore cache read errors, use defaults
+        }
+      }
+
       const created = d.createdAt?.toDate?.()?.toISOString?.().substring(0, 19) || "?";
       console.log(`${doc.id}`);
       console.log(`  Target: ${target} | Score: ${score} | ${created}`);
@@ -36,7 +62,7 @@ admin
         console.log(`  CacheKey: ${d.cacheKey}`);
       }
       console.log("");
-    });
+    }
     process.exit(0);
   })
   .catch((e) => {
