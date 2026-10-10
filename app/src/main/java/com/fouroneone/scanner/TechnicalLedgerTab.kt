@@ -399,12 +399,40 @@ fun TechnicalLedgerTab(
             if (
                 score >= 8.0
             ) {
+                // Smart report routing: pick the best authority based on what was scanned
+                val badges = consumerCard?.classificationBadges ?: emptyList()
+                val surface = consumerCard?.interfaceSurface ?: ""
+                val target = consumerCard?.targetName ?: ""
+
+                val (reportUrl, reportLabel) = when {
+                    // Play Store app → Google Play reporting
+                    surface.contains("play.google.com", ignoreCase = true) ||
+                    badges.any { it.contains("android", ignoreCase = true) && it.contains("app", ignoreCase = true) } ->
+                        "https://support.google.com/googleplay/answer/2853570" to "Report to Google Play"
+
+                    // Malware → CISA malware reporting
+                    badges.any { it.contains("malware", ignoreCase = true) } ->
+                        "https://www.cisa.gov/report" to "Report Malware"
+
+                    // Phishing → Anti-Phishing Working Group
+                    badges.any { it.contains("phish", ignoreCase = true) } ->
+                        "https://apwg.org/report-phishing/" to "Report Phishing"
+
+                    // Crypto scam → FTC + SEC
+                    badges.any { it.contains("crypto", ignoreCase = true) } ->
+                        "https://reportfraud.ftc.gov/" to "Report to FTC"
+
+                    // Default: FTC fraud report
+                    else ->
+                        "https://reportfraud.ftc.gov/" to "Report"
+                }
+
                 OutlinedButton(
                     onClick = {
                         context.startActivity(
                             Intent(
                                 Intent.ACTION_VIEW,
-                                Uri.parse("https://reportfraud.ftc.gov/")
+                                Uri.parse(reportUrl)
                             )
                         )
                     },
@@ -428,7 +456,7 @@ fun TechnicalLedgerTab(
                     )
 
                     Text(
-                        "Report",
+                        reportLabel,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xFFB3261E)
