@@ -46,6 +46,24 @@ async function loadScan(requestId) {
     const doc = snap.docs[0];
     targetId = doc.id;
     console.log(`\nUsing most recent scan: ${targetId}`);
+  } else if (requestId === "list") {
+    const snap = await db
+      .collection("scan_receipts")
+      .orderBy("createdAt", "desc")
+      .limit(10)
+      .get();
+    if (snap.empty) {
+      throw new Error("No scans found.");
+    }
+    console.log("\nRecent scans:");
+    snap.docs.forEach((doc, i) => {
+      const d = doc.data();
+      const target = d.targetName || d.target || "?";
+      const ts = d.createdAt?.toDate?.()?.toISOString?.()?.substring(0, 16) || "?";
+      console.log(`  ${i + 1}. ${doc.id} | ${target} | ${ts}`);
+    });
+    console.log("\nRun with a specific ID: node scripts/ask-gemini.js <requestId>");
+    process.exit(0);
   }
 
   // Load from scan_cache via the receipt's cacheKey
