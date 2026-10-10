@@ -89,10 +89,11 @@ function buildContext(receipt, cached) {
 
   ctx += `=== COST & TOKEN TELEMETRY ===\n`;
   ctx += `Total Cost: $${receipt.totalCost ?? "unknown"}\n`;
-  ctx += `Input Tokens: ${receipt.inputTokens ?? "unknown"}\n`;
+  ctx += `Prompt Tokens: ${receipt.promptTokens ?? "unknown"}\n`;
   ctx += `Output Tokens: ${receipt.outputTokens ?? "unknown"}\n`;
-  ctx += `Total Tokens: ${((receipt.inputTokens || 0) + (receipt.outputTokens || 0)) || "unknown"}\n`;
-  ctx += `Model (P1): ${receipt.pass1Model || "unknown"}\n`;
+  ctx += `Thought Tokens: ${receipt.thoughtTokens ?? "unknown"}\n`;
+  ctx += `Total Tokens: ${((receipt.promptTokens || 0) + (receipt.outputTokens || 0) + (receipt.thoughtTokens || 0)) || "unknown"}\n`;
+  ctx += `Model (P1): ${receipt.pass1Model || receipt.model || "unknown"}\n`;
   ctx += `Model (P2): ${receipt.pass2Model || "unknown"}\n`;
   ctx += `Cache Key: ${receipt.cacheKey || "(none)"}\n`;
   ctx += `Cache Hit: ${receipt.cacheHit ? "yes" : "no"}\n\n`;
