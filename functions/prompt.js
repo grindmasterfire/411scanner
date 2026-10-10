@@ -1060,6 +1060,30 @@ TECHNICAL 411 EVIDENCE RECEIPTS
 
 Always return evidence_receipts as required by the supplied response schema.
 
+You MUST attempt a receipt for each of the following 19 fields. For each field, emit a receipt with status VERIFIED (if evidence found), NOT_FOUND (if searched but not found), or NOT_APPLICABLE (if the field does not apply to this target type). Do NOT skip fields.
+
+1. attribution.operator_name
+2. attribution.official_domain
+3. attribution.business_addresses
+4. domain_registration.registrar
+5. domain_registration.registrant
+6. infrastructure.ip_addresses (probe-supplied, do not duplicate)
+7. infrastructure.asn (probe-supplied, do not duplicate)
+8. infrastructure.tls_issuer (probe-supplied, do not duplicate)
+9. infrastructure.mail_servers (probe-supplied, do not duplicate)
+10. infrastructure.dmarc_record (probe-supplied, do not duplicate)
+11. infrastructure.tracking_ids (probe-supplied, do not duplicate)
+12. infrastructure.subdomains (probe-supplied, do not duplicate)
+13. infrastructure.origin_host
+14. infrastructure.host_cdn
+15. regulatory_record.license_status
+16. regulatory_record.bbb_record
+17. regulatory_record.ftc_record
+18. regulatory_record.review_spread
+19. commercial_terms.withdrawal_gate
+
+For probe-supplied fields (6-12), the server stamps these automatically. Do NOT emit duplicate receipts for them unless you have additional grounded evidence beyond the probe data.
+
 Each receipt contains:
 
 field
