@@ -37,7 +37,7 @@ async function loadScan(requestId) {
   if (requestId === "last") {
     const snap = await db
       .collection("scan_receipts")
-      .orderBy("timestamp", "desc")
+      .orderBy("createdAt", "desc")
       .limit(1)
       .get();
     if (snap.empty) {
