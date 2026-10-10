@@ -72,23 +72,66 @@ function buildContext(receipt, cached) {
   const report = cached.report || cached;
   const ledger = report.technical_ledger || {};
   const receipts = ledger.evidence_receipts || [];
+  const consumerCard = report.consumer_card || {};
+  const telemetry = report.telemetry || {};
 
   let ctx = `You are the Gemini model that performed a 411 Scanner investigation. `;
   ctx += `The operator is asking you diagnostic questions about WHY you produced certain output. `;
+  ctx += `You have FULL context: the complete technical ledger, all receipts, probe data, grounding sources, scoring data, and cost telemetry. `;
   ctx += `Answer honestly and specifically based on the data below. If you don't know, say so.\n\n`;
 
   ctx += `=== SCAN METADATA ===\n`;
   ctx += `Request ID: ${receipt.requestId || "unknown"}\n`;
-  ctx += `Target: ${receipt.target || "unknown"}\n`;
-  ctx += `Score: ${report.score ?? "unknown"}\n\n`;
+  ctx += `Target: ${receipt.target || consumerCard.entity_name || "unknown"}\n`;
+  ctx += `Action Meter Score: ${consumerCard.action_meter_score ?? report.score ?? "unknown"}\n`;
+  ctx += `Mode: ${receipt.mode || "unknown"}\n`;
+  ctx += `Timestamp: ${receipt.createdAt?.toDate?.()?.toISOString?.() || "unknown"}\n\n`;
 
-  ctx += `=== EVIDENCE RECEIPTS YOU PRODUCED (${receipts.length}) ===\n`;
+  ctx += `=== COST TELEMETRY ===\n`;
+  ctx += `Total Cost: $${receipt.totalCost ?? "unknown"}\n`;
+  ctx += `Cache Key: ${receipt.cacheKey || "(none)"}\n\n`;
+
+  ctx += `=== EVIDENCE RECEIPTS (${receipts.length}) ===\n`;
   receipts.forEach((r, i) => {
     ctx += `\n${i + 1}. [${(r.status || "unknown").toUpperCase()}] ${r.field || "unknown field"}\n`;
-    ctx += `   Finding: ${(r.finding || "").substring(0, 300)}\n`;
+    ctx += `   Finding: ${(r.finding || "").substring(0, 500)}\n`;
     ctx += `   Authority: ${r.authority || "none"}\n`;
+    ctx += `   Subject: ${r.subject || "none"}\n`;
     ctx += `   Source URL: ${r.source_url || "(none)"}\n`;
+    if (r.identifier) ctx += `   Identifier: ${r.identifier}\n`;
   });
+
+  ctx += `\n=== FULL TECHNICAL LEDGER ===\n`;
+  // Attribution
+  if (ledger.attribution) {
+    ctx += `\nAttribution:\n`;
+    for (const [k, v] of Object.entries(ledger.attribution)) {
+      const str = typeof v === "object" ? JSON.stringify(v).substring(0, 200) : String(v).substring(0, 200);
+      ctx += `  ${k}: ${str}\n`;
+    }
+  }
+  // Infrastructure
+  if (ledger.infrastructure) {
+    ctx += `\nInfrastructure:\n`;
+    for (const [k, v] of Object.entries(ledger.infrastructure)) {
+      const str = Array.isArray(v) ? v.join(", ").substring(0, 200) : String(v).substring(0, 200);
+      ctx += `  ${k}: ${str}\n`;
+    }
+  }
+  // Domain registration
+  if (ledger.domain_registration) {
+    ctx += `\nDomain Registration:\n`;
+    for (const [k, v] of Object.entries(ledger.domain_registration)) {
+      ctx += `  ${k}: ${String(v).substring(0, 200)}\n`;
+    }
+  }
+  // Network telemetry
+  if (ledger.network_telemetry) {
+    ctx += `\nNetwork Telemetry:\n`;
+    for (const [k, v] of Object.entries(ledger.network_telemetry)) {
+      ctx += `  ${k}: ${String(v).substring(0, 200)}\n`;
+    }
+  }
 
   ctx += `\n=== PROBE DATA (deterministic server measurements) ===\n`;
   const probeFields = [
@@ -99,16 +142,50 @@ function buildContext(receipt, cached) {
     "tracking_ids",
     "subdomains",
     "asn",
+    "asn_organization",
+    "tls_certificate_status",
   ];
+  const infra = ledger.infrastructure || {};
   probeFields.forEach((f) => {
-    const val = ledger[f];
-    if (val !== undefined && val !== null) {
+    const val = infra[f] ?? ledger[f];
+    if (val !== undefined && val !== null && val !== "") {
       const str = Array.isArray(val) ? val.join(", ") : String(val);
-      ctx += `${f}: ${str.substring(0, 200) || "(empty)"}\n`;
+      ctx += `${f}: ${str.substring(0, 300) || "(empty)"}\n`;
     } else {
       ctx += `${f}: (not present in ledger)\n`;
     }
   });
+
+  // Grounding sources
+  const sources = report.grounding_sources || report.sources || [];
+  if (sources.length > 0) {
+    ctx += `\n=== GROUNDING SOURCES (${sources.length}) ===\n`;
+    sources.slice(0, 30).forEach((s, i) => {
+      const url = typeof s === "string" ? s : s.url || s.uri || JSON.stringify(s).substring(0, 100);
+      ctx += `${i + 1}. ${url.substring(0, 150)}\n`;
+    });
+    if (sources.length > 30) ctx += `... and ${sources.length - 30} more\n`;
+  }
+
+  // Consumer card scoring details
+  if (consumerCard && Object.keys(consumerCard).length > 0) {
+    ctx += `\n=== CONSUMER CARD ===\n`;
+    ctx += `Entity: ${consumerCard.entity_name || "unknown"}\n`;
+    ctx += `Score: ${consumerCard.action_meter_score ?? "unknown"}\n`;
+    if (consumerCard.risk_vectors) {
+      ctx += `Risk Vectors: ${JSON.stringify(consumerCard.risk_vectors).substring(0, 500)}\n`;
+    }
+  }
+
+  // Scoring context
+  ctx += `\n=== SCORING CONTEXT ===\n`;
+  ctx += `The 411 Scanner uses a 1-10 action meter:\n`;
+  ctx += `- 1-5.5: Lower risk, shows verified contact info\n`;
+  ctx += `- 5.6+: Higher risk, shows fog light of alternatives\n`;
+  ctx += `- 8: Do not put on device\n`;
+  ctx += `- 9: Report to platform\n`;
+  ctx += `- 10: Malware/dangerous\n`;
+  ctx += `Score is calculated from 6 risk vectors. Positive factors (longevity, reviews) should offset negatives.\n\n`;
 
   return ctx;
 }
