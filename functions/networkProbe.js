@@ -853,41 +853,49 @@ function applyMeasuredLedger(report, probe) {
   const existingFields = new Set(receipts.map((r) => r.field));
   const domain = probe.domain || "";
 
-  function stampProbeReceipt(field, finding) {
+  function stampProbeReceipt(field, finding, sourceUrl = "") {
     if (!finding || existingFields.has(field)) return;
     receipts.push({
       field,
       status: "verified",
       finding,
       authority: "Network Probe",
-      source_url: "",
+      source_url: sourceUrl,
       subject: domain,
     });
     existingFields.add(field);
   }
 
+  // Verifier URLs — user can independently verify each probe measurement
+  const apex = probe.apex_domain || domain.replace(/^www\./i, "");
+  const dnsVerifier = (type) => `https://mxtoolbox.com/SuperTool.aspx?action=${type}%3a${apex}`;
+
   if (infra.ip_addresses && infra.ip_addresses.length > 0) {
     stampProbeReceipt(
       "infrastructure.ip_addresses",
-      `Resolved IP addresses: ${infra.ip_addresses.join(", ")}`
+      `Resolved IP addresses: ${infra.ip_addresses.join(", ")}`,
+      dnsVerifier("a")
     );
   }
   if (infra.mail_servers && infra.mail_servers.length > 0) {
     stampProbeReceipt(
       "infrastructure.mail_servers",
-      `Mail exchangers: ${infra.mail_servers.join(", ")}`
+      `Mail exchangers: ${infra.mail_servers.join(", ")}`,
+      dnsVerifier("mx")
     );
   }
   if (infra.dmarc_record) {
     stampProbeReceipt(
       "infrastructure.dmarc_record",
-      `DMARC record: ${infra.dmarc_record}`
+      `DMARC record: ${infra.dmarc_record}`,
+      dnsVerifier("dmarc")
     );
   }
   if (infra.spf_record) {
     stampProbeReceipt(
       "infrastructure.spf_record",
-      `SPF record: ${infra.spf_record}`
+      `SPF record: ${infra.spf_record}`,
+      dnsVerifier("spf")
     );
   }
   if (infra.tracking_ids && infra.tracking_ids.length > 0) {
@@ -910,19 +918,23 @@ function applyMeasuredLedger(report, probe) {
   if (infra.subdomains && infra.subdomains.length > 0) {
     stampProbeReceipt(
       "infrastructure.subdomains",
-      `Discovered subdomains: ${infra.subdomains.join(", ")}`
+      `Discovered subdomains: ${infra.subdomains.join(", ")}`,
+      `https://crt.sh/?q=${apex}`
     );
   }
   if (infra.asn) {
+    const asnNum = String(infra.asn).replace(/[^0-9]/g, "");
     stampProbeReceipt(
       "infrastructure.asn",
-      `ASN: ${infra.asn}${infra.asn_organization ? ` (${infra.asn_organization})` : ""}`
+      `ASN: ${infra.asn}${infra.asn_organization ? ` (${infra.asn_organization})` : ""}`,
+      asnNum ? `https://bgp.he.net/AS${asnNum}` : ""
     );
   }
   if (telemetry.tls_certificate_status) {
     stampProbeReceipt(
       "infrastructure.tls_issuer",
-      `TLS certificate status: ${telemetry.tls_certificate_status}`
+      `TLS certificate status: ${telemetry.tls_certificate_status}`,
+      `https://www.ssllabs.com/ssltest/analyze.html?d=${domain}`
     );
   }
 
