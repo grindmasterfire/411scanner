@@ -874,7 +874,7 @@ function applyMeasuredLedger(report, probe) {
     stampProbeReceipt(
       "infrastructure.ip_addresses",
       `Resolved IP addresses: ${infra.ip_addresses.join(", ")}`,
-      dnsVerifier("a")
+      `https://www.whatsmydns.net/#A/${apex}`
     );
   }
   if (infra.mail_servers && infra.mail_servers.length > 0) {
