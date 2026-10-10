@@ -595,14 +595,25 @@ async function runNetworkProbe(linkEvidence, candidateDomain) {
     if (!domain) {
       return { measured: false, measured_at: stamp };
     }
+
+    /*
+     * Apex normalization for DNS-based probes.
+     * WHY: MX, SPF, and DMARC records live on the apex domain, not subdomains.
+     * Querying www.example.com for MX returns nothing; example.com has the records.
+     * Added 2026-10-10 per Gemini interrogator discovery.
+     */
+    const apexDomain = domain
+      .toLowerCase()
+      .replace(/^www\./i, "");
+
     const [tlsR, hostR, ageR, mxR, dmarcR, trackR, subR] = await Promise.allSettled([
       checkTls(domain),
       checkHosting(domain),
-      checkDomainAge(domain),
-      checkMailServers(domain),
-      checkDmarcSpf(domain),
+      checkDomainAge(apexDomain),
+      checkMailServers(apexDomain),
+      checkDmarcSpf(apexDomain),
       checkTrackingIds(domain),
-      checkSubdomains(domain),
+      checkSubdomains(apexDomain),
     ]);
     const tlsStatus =
       tlsR.status === "fulfilled" && tlsR.value ? tlsR.value.status : "unreachable";
@@ -648,6 +659,7 @@ async function runNetworkProbe(linkEvidence, candidateDomain) {
       measured,
       measured_at: stamp,
       domain,
+      apex_domain: apexDomain,
       tls_certificate_status: tlsStatus,
       host_cdn: hosting ? hosting.host_cdn : "unknown",
       domain_age_days: ageDays,
