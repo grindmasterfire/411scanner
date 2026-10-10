@@ -89,4 +89,4 @@ This is a solo-build repo. Issues and PRs are welcome but may be triaged slowly.
 
 ## License
 
-All rights reserved © Cypherworks Dev Cottage.
+All rights reserved © cipherworks Dev Cottage.
