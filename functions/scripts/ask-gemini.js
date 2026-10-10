@@ -90,7 +90,10 @@ function buildContext(receipt, cached) {
   ctx += `=== COST & TOKEN TELEMETRY ===\n`;
   const usage = receipt.usage || {};
   const cost = receipt.cost || {};
-  ctx += `Total Cost: $${cost.total ?? cost.totalCost ?? "unknown"}\n`;
+  const totalCost = (cost.tokenCostUsd || 0) + (cost.groundingCostUsdAtPaidRate || 0);
+  ctx += `Total Cost: $${totalCost ? totalCost.toFixed(4) : "unknown"}\n`;
+  ctx += `  - Token Cost: $${cost.tokenCostUsd?.toFixed(4) || "unknown"}\n`;
+  ctx += `  - Grounding Cost: $${cost.groundingCostUsdAtPaidRate?.toFixed(4) || "unknown"}\n`;
   ctx += `Prompt Tokens: ${usage.promptTokens ?? "unknown"}\n`;
   ctx += `Output Tokens: ${usage.outputTokens ?? "unknown"}\n`;
   ctx += `Thought Tokens: ${usage.thoughtTokens ?? "unknown"}\n`;
