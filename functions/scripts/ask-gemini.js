@@ -63,7 +63,59 @@ async function loadScan(requestId) {
       console.log(`  ${i + 1}. ${doc.id} | ${target} | ${ts}`);
     });
     console.log("\nRun with a specific ID: node scripts/ask-gemini.js <requestId>");
+    console.log("Or business overview: node scripts/ask-gemini.js business");
     process.exit(0);
+  } else if (requestId === "business") {
+    // Load aggregate business center data across recent scans
+    const snap = await db
+      .collection("scan_receipts")
+      .orderBy("createdAt", "desc")
+      .limit(50)
+      .get();
+    if (snap.empty) {
+      throw new Error("No scans found.");
+    }
+
+    let totalCost = 0;
+    let totalPromptTokens = 0;
+    let totalOutputTokens = 0;
+    let totalThoughtTokens = 0;
+    let freshCount = 0;
+    let cacheHitCount = 0;
+    const byTarget = {};
+
+    snap.docs.forEach((doc) => {
+      const d = doc.data();
+      const usage = d.usage || {};
+      const cost = d.cost || {};
+      totalCost += (cost.tokenCostUsd || 0) + (cost.groundingCostUsdAtPaidRate || 0);
+      totalPromptTokens += usage.promptTokens || 0;
+      totalOutputTokens += usage.outputTokens || 0;
+      totalThoughtTokens += usage.thoughtTokens || 0;
+      if (d.cacheHit) cacheHitCount++;
+      else freshCount++;
+
+      const target = d.targetName || "unknown";
+      if (!byTarget[target]) byTarget[target] = { count: 0, cost: 0 };
+      byTarget[target].count++;
+      byTarget[target].cost += (cost.tokenCostUsd || 0) + (cost.groundingCostUsdAtPaidRate || 0);
+    });
+
+    const businessData = {
+      scanCount: snap.size,
+      totalCost,
+      totalPromptTokens,
+      totalOutputTokens,
+      totalThoughtTokens,
+      totalTokens: totalPromptTokens + totalOutputTokens + totalThoughtTokens,
+      freshCount,
+      cacheHitCount,
+      avgCostPerScan: snap.size > 0 ? totalCost / snap.size : 0,
+      byTarget,
+    };
+
+    console.log(`\nLoaded business data for ${snap.size} recent scans.`);
+    return { businessData, isBusinessMode: true };
   }
 
   // Load from scan_cache via the receipt's cacheKey
@@ -84,6 +136,33 @@ async function loadScan(requestId) {
   }
 
   return { receipt, report: cacheDoc.data(), requestId: targetId };
+}
+
+function buildBusinessContext(data) {
+  let ctx = `You are a business analyst for 411 Scanner. `;
+  ctx += `The operator is asking about aggregate costs, token usage, and efficiency across recent scans. `;
+  ctx += `Answer based on the business data below.\n\n`;
+
+  ctx += `=== BUSINESS OVERVIEW (${data.scanCount} recent scans) ===\n`;
+  ctx += `Total Cost: $${data.totalCost.toFixed(4)}\n`;
+  ctx += `Average Cost per Scan: $${data.avgCostPerScan.toFixed(4)}\n`;
+  ctx += `Total Tokens: ${data.totalTokens.toLocaleString()}\n`;
+  ctx += `  - Prompt: ${data.totalPromptTokens.toLocaleString()}\n`;
+  ctx += `  - Output: ${data.totalOutputTokens.toLocaleString()}\n`;
+  ctx += `  - Thought: ${data.totalThoughtTokens.toLocaleString()}\n`;
+  ctx += `Fresh Scans: ${data.freshCount}\n`;
+  ctx += `Cache Hits: ${data.cacheHitCount}\n\n`;
+
+  ctx += `=== COST BY TARGET ===\n`;
+  const sorted = Object.entries(data.byTarget)
+    .sort((a, b) => b[1].cost - a[1].cost)
+    .slice(0, 15);
+  sorted.forEach(([target, info]) => {
+    ctx += `${target}: ${info.count} scan(s), $${info.cost.toFixed(4)}\n`;
+  });
+
+  ctx += `\nPlanning benchmark: $0.325 per fresh scan worst case.\n`;
+  return ctx;
 }
 
 function buildContext(receipt, cached) {
@@ -235,8 +314,18 @@ async function main() {
   }
 
   console.log("Loading scan data...");
-  const { receipt, report, requestId: rid } = await loadScan(requestId);
-  const context = buildContext(receipt, report);
+  const loaded = await loadScan(requestId);
+
+  let context;
+  let greeting;
+  if (loaded.isBusinessMode) {
+    context = buildBusinessContext(loaded.businessData);
+    greeting = "I have the business center data loaded across recent scans. Ask me about costs, token usage, trends, or efficiency.";
+  } else {
+    const { receipt, report } = loaded;
+    context = buildContext(receipt, report);
+    greeting = "I have the scan context loaded. Ask me anything about why I produced the output I did.";
+  }
 
   console.log(`\nContext loaded. Starting interrogation session with ${PASS2_MODEL}.`);
   console.log("Ask questions about the scan. Type 'exit' or 'quit' to end.\n");
@@ -254,7 +343,7 @@ async function main() {
         role: "model",
         parts: [
           {
-            text: "I have the scan context loaded. Ask me anything about why I produced the output I did.",
+            text: greeting,
           },
         ],
       },
