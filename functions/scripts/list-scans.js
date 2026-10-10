@@ -39,15 +39,14 @@ admin
             .doc(d.cacheKey)
             .get();
           if (cacheDoc.exists) {
-            const report = cacheDoc.data();
-            // Try multiple possible locations for target/domain
+            const cached = cacheDoc.data();
+            const report = cached.report || cached;
+            // Use same fields as forensic.js
             target =
-              report.target ||
-              report.domain ||
-              report.solicitation_identity?.destination_domain ||
               report.consumer_card?.entity_name ||
+              report.solicitation_identity?.destination_domain ||
               "unknown";
-            score = report.score ?? report.consumer_card?.action_meter_score ?? "?";
+            score = report.consumer_card?.action_meter_score ?? "?";
             if (typeof target === "string") target = target.substring(0, 40);
           }
         } catch (e) {
