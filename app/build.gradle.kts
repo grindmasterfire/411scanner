@@ -58,9 +58,9 @@ android {
     }
     debug {
       signingConfig = signingConfigs.getByName("debugConfig")
-      // Test minification impact on size; disable if it breaks debugging
-      isMinifyEnabled = true
-      isShrinkResources = true
+      // Minification disabled for debug - was causing startup crashes
+      isMinifyEnabled = false
+      isShrinkResources = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }
   }
