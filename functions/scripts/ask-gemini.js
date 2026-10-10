@@ -88,13 +88,15 @@ function buildContext(receipt, cached) {
   ctx += `Timestamp: ${receipt.createdAt?.toDate?.()?.toISOString?.() || "unknown"}\n\n`;
 
   ctx += `=== COST & TOKEN TELEMETRY ===\n`;
-  ctx += `Total Cost: $${receipt.totalCost ?? "unknown"}\n`;
-  ctx += `Prompt Tokens: ${receipt.promptTokens ?? "unknown"}\n`;
-  ctx += `Output Tokens: ${receipt.outputTokens ?? "unknown"}\n`;
-  ctx += `Thought Tokens: ${receipt.thoughtTokens ?? "unknown"}\n`;
-  ctx += `Total Tokens: ${((receipt.promptTokens || 0) + (receipt.outputTokens || 0) + (receipt.thoughtTokens || 0)) || "unknown"}\n`;
-  ctx += `Model (P1): ${receipt.pass1Model || receipt.model || "unknown"}\n`;
-  ctx += `Model (P2): ${receipt.pass2Model || "unknown"}\n`;
+  const usage = receipt.usage || {};
+  const cost = receipt.cost || {};
+  ctx += `Total Cost: $${cost.total ?? cost.totalCost ?? "unknown"}\n`;
+  ctx += `Prompt Tokens: ${usage.promptTokens ?? "unknown"}\n`;
+  ctx += `Output Tokens: ${usage.outputTokens ?? "unknown"}\n`;
+  ctx += `Thought Tokens: ${usage.thoughtTokens ?? "unknown"}\n`;
+  ctx += `Total Tokens: ${((usage.promptTokens || 0) + (usage.outputTokens || 0) + (usage.thoughtTokens || 0)) || "unknown"}\n`;
+  ctx += `Model: ${receipt.model || "unknown"}\n`;
+  ctx += `Target: ${receipt.targetName || "unknown"}\n`;
   ctx += `Cache Key: ${receipt.cacheKey || "(none)"}\n`;
   ctx += `Cache Hit: ${receipt.cacheHit ? "yes" : "no"}\n\n`;
 
