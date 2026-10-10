@@ -470,10 +470,24 @@ async function checkTrackingIds(hostname) {
         const req = https.get(
           `https://${hostname}/`,
           {
-            headers: { "User-Agent": SCANNER_UA },
+            headers: {
+              // Use browser UA to avoid bot mitigation (Akamai, Cloudflare)
+              // Approved by Gemini via interrogator 2026-10-10
+              "User-Agent":
+                "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36",
+              "Accept-Language": "en-US,en;q=0.9",
+              "Accept":
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            },
             timeout: PER_CHECK_TIMEOUT_MS,
           },
           (res) => {
+            // Explicit WAF block handling — mark as not_accessible, don't silently return null
+            if (res.statusCode === 403 || res.statusCode === 429) {
+              res.destroy();
+              reject(new Error("waf_blocked"));
+              return;
+            }
             if (res.statusCode !== 200) {
               res.destroy();
               reject(new Error(`http ${res.statusCode}`));
@@ -499,8 +513,13 @@ async function checkTrackingIds(hostname) {
       }),
       PER_CHECK_TIMEOUT_MS + 2000,
       "pagesource"
-    ).catch(() => null);
+    ).catch((err) => {
+      // Explicit WAF block marker — distinguishes bot mitigation from other failures
+      if (err && err.message === "waf_blocked") return { _wafBlocked: true };
+      return null;
+    });
     if (!html) return null;
+    if (html._wafBlocked) return { _wafBlocked: true };
     const found = {};
     for (const { name, regex } of TRACKING_PATTERNS) {
       const matches = [...new Set(html.match(regex) || [])];
@@ -794,7 +813,10 @@ function applyMeasuredLedger(report, probe) {
   }
 
   // tracking_ids: probe returns {GA4:[...],GTM:[...]}; schema/Android expect string[]
-  if (probe.tracking_ids && !infra.tracking_ids) {
+  // WAF block: if probe was blocked by bot mitigation, mark explicitly
+  if (probe.tracking_ids && probe.tracking_ids._wafBlocked) {
+    infra.tracking_ids_waf_blocked = true;
+  } else if (probe.tracking_ids && !infra.tracking_ids) {
     infra.tracking_ids = Object.entries(probe.tracking_ids)
       .flatMap(([type, ids]) =>
         (Array.isArray(ids) ? ids : [ids]).map((id) => `${type}: ${id}`)
@@ -873,6 +895,17 @@ function applyMeasuredLedger(report, probe) {
       "infrastructure.tracking_ids",
       `Tracking IDs: ${infra.tracking_ids.join(", ")}`
     );
+  } else if (infra.tracking_ids_waf_blocked) {
+    // Explicit WAF block — not silently missing
+    receipts.push({
+      field: "infrastructure.tracking_ids",
+      status: "not_accessible",
+      finding: "Tracking ID probe blocked by CDN bot mitigation (WAF). The target uses bot protection that prevents automated page scraping.",
+      authority: "Network Probe",
+      source_url: "",
+      subject: domain,
+    });
+    existingFields.add("infrastructure.tracking_ids");
   }
   if (infra.subdomains && infra.subdomains.length > 0) {
     stampProbeReceipt(
