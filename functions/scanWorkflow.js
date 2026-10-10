@@ -393,6 +393,22 @@ async function executeScan(
     }
   }
   telemetry.probe_status = probeStatus;
+
+  /*
+   * Guard: Abort empty scans before billing and persistence.
+   * If the probe was bypassed (no target from OCR) and the fallback
+   * probe also found no domain from Gemini's analysis, the scan has
+   * no technical facts to evaluate. Proceeding would charge the customer
+   * for an empty result and waste AI API costs.
+   * Added 2026-10-10 per Gemini interrogator diagnosis.
+   */
+  if (probeStatus === "bypassed_no_target") {
+    throw new HttpsError(
+      "failed-precondition",
+      "Scan aborted: no target domain could be identified from the image or analysis. No charges applied."
+    );
+  }
+
   const composition =
     result.composition || null;
 
