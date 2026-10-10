@@ -291,7 +291,10 @@ function normalizeEvidenceReceipt(receipt, groundedSourceMap) {
     source_title: groundedSource?.title || "",
   };
 
-  if (normalized.status === "verified" && !groundedSource) {
+  // Do NOT downgrade Network Probe receipts — deterministic server measurements
+  // are authoritative by nature and never have grounded source URLs.
+  const isProbeReceipt = (normalized.authority || "").toLowerCase().includes("network probe");
+  if (normalized.status === "verified" && !groundedSource && !isProbeReceipt) {
     normalized.status = "unresolved";
     // Preserve the original receipt URL — do not wipe the evidence trail.
     // The client filters unusable URLs from Inspect Source destinations.
@@ -307,8 +310,10 @@ function normalizeEvidenceReceipt(receipt, groundedSourceMap) {
   // empty), the claim is not provider-confirmed. Downgrade the status but
   // PRESERVE the source URL — the Android client filters redirect URLs from
   // Inspect Source destinations. Wiping the URL destroys the evidence trail.
+  // EXEMPTION: Network Probe receipts have no source URL by design (deterministic).
   if (
     normalized.status === "verified" &&
+    !isProbeReceipt &&
     (!normalized.source_url || isGroundingRedirect(normalized.source_url))
   ) {
     normalized.status = "unresolved";
