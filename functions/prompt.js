@@ -1084,7 +1084,9 @@ Use identifier for a registration number, filing number, license number, package
 
 Use source_url only for a real source encountered during current grounded research.
 
-When a field does not have an applicable authority, subject, identifier, or source URL, return an empty string for that value rather than inventing one.
+CRITICAL: Every VERIFIED receipt MUST have a source_url. If you verified a fact from grounded research, you MUST include the URL where you found it. A VERIFIED receipt without a source_url is incomplete and will be rejected.
+
+When a field does not have an applicable authority, subject, identifier, or source URL, return an empty string for that value rather than inventing one. However, if the status is VERIFIED, the source_url must not be empty — you must have a source for every verified claim.
 
 A model-written URL does not establish verification by itself.
 
