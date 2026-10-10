@@ -87,9 +87,15 @@ function buildContext(receipt, cached) {
   ctx += `Mode: ${receipt.mode || "unknown"}\n`;
   ctx += `Timestamp: ${receipt.createdAt?.toDate?.()?.toISOString?.() || "unknown"}\n\n`;
 
-  ctx += `=== COST TELEMETRY ===\n`;
+  ctx += `=== COST & TOKEN TELEMETRY ===\n`;
   ctx += `Total Cost: $${receipt.totalCost ?? "unknown"}\n`;
-  ctx += `Cache Key: ${receipt.cacheKey || "(none)"}\n\n`;
+  ctx += `Input Tokens: ${receipt.inputTokens ?? "unknown"}\n`;
+  ctx += `Output Tokens: ${receipt.outputTokens ?? "unknown"}\n`;
+  ctx += `Total Tokens: ${((receipt.inputTokens || 0) + (receipt.outputTokens || 0)) || "unknown"}\n`;
+  ctx += `Model (P1): ${receipt.pass1Model || "unknown"}\n`;
+  ctx += `Model (P2): ${receipt.pass2Model || "unknown"}\n`;
+  ctx += `Cache Key: ${receipt.cacheKey || "(none)"}\n`;
+  ctx += `Cache Hit: ${receipt.cacheHit ? "yes" : "no"}\n\n`;
 
   ctx += `=== EVIDENCE RECEIPTS (${receipts.length}) ===\n`;
   receipts.forEach((r, i) => {
