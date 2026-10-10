@@ -990,7 +990,7 @@ infrastructure.tracking_ids — finding: list each tracking ID found (e.g. "GA4:
 
 infrastructure.subdomains — finding: list discovered subdomains. status: not_researched if not in probe context.
 
-For all probe-measured receipts: set status to not_researched (not verified) because the values come from server measurement, not from your live grounded web research. Set source_url to empty string. Set authority to "Network Probe" and subject to the measured domain.
+For all probe-measured receipts: set status to verified because the values come from authoritative server measurement. Set source_url to empty string. Set authority to "Network Probe" and subject to the measured domain.
 
 Absence of a verified license is not proof that a target is unlicensed.
 
