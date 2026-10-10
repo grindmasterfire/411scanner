@@ -71,6 +71,38 @@ function extractFloorRaisers(parsedData) {
     adArbitrageMfaLure:
       source.ad_arbitrage_mfa_lure === true &&
       hasEvidence(evidence.ad_arbitrage_mfa_lure),
+
+    greyMarketCredentialResale:
+      source.grey_market_credential_resale === true &&
+      hasEvidence(evidence.grey_market_credential_resale),
+
+    credentialHarvesting:
+      source.credential_harvesting === true &&
+      hasEvidence(evidence.credential_harvesting),
+
+    coordinatedReviewFraud:
+      source.coordinated_review_fraud === true &&
+      hasEvidence(evidence.coordinated_review_fraud),
+
+    dataBrokerage:
+      source.data_brokerage === true &&
+      hasEvidence(evidence.data_brokerage),
+
+    subscriptionDarkPatterns:
+      source.subscription_dark_patterns === true &&
+      hasEvidence(evidence.subscription_dark_patterns),
+
+    recruitmentGatedEarnings:
+      source.recruitment_gated_earnings === true &&
+      hasEvidence(evidence.recruitment_gated_earnings),
+
+    brandImpersonation:
+      source.brand_impersonation === true &&
+      hasEvidence(evidence.brand_impersonation),
+
+    extortionMechanics:
+      source.extortion_mechanics === true &&
+      hasEvidence(evidence.extortion_mechanics),
   };
 }
 
@@ -119,6 +151,38 @@ function applyFloorRaisers(
 
   if (floorRaisers.adArbitrageMfaLure) {
     score += 0.5;
+  }
+
+  if (floorRaisers.greyMarketCredentialResale) {
+    score += 1.0;
+  }
+
+  if (floorRaisers.credentialHarvesting) {
+    score += 1.5;
+  }
+
+  if (floorRaisers.coordinatedReviewFraud) {
+    score += 1.0;
+  }
+
+  if (floorRaisers.dataBrokerage) {
+    score += 1.0;
+  }
+
+  if (floorRaisers.subscriptionDarkPatterns) {
+    score += 0.5;
+  }
+
+  if (floorRaisers.recruitmentGatedEarnings) {
+    score += 1.0;
+  }
+
+  if (floorRaisers.brandImpersonation) {
+    score += 1.5;
+  }
+
+  if (floorRaisers.extortionMechanics) {
+    score += 2.0;
   }
 
   return score;

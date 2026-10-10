@@ -769,7 +769,7 @@ The model must return every machine-readable Floor-Raiser boolean required by th
 
 The model must also return the floor_raiser_evidence object required by the response schema.
 
-The floor_raiser_evidence object uses the same eight field names as floor_raisers.
+The floor_raiser_evidence object uses the same sixteen field names as floor_raisers.
 
 Each floor_raiser_evidence field is an array of evidence statements.
 
@@ -834,6 +834,54 @@ Ordinary advertising, affiliate marketing, or low-quality clickbait does not aut
 Ad Arbitrage / MFA Lure requires evidence that the destination primarily functions to extract ad impressions, affiliate value, repeated redirects, deceptive verification or MFA behavior, or equivalent monetization through low-value intermediary steps rather than delivering the represented consumer value.
 
 Set ad_arbitrage_mfa_lure to true only when evidence establishes the deceptive monetization mechanism.
+
+GREY MARKET CREDENTIAL RESALE
+
+Selling API keys, software licenses, game keys, or digital subscriptions obtained through unauthorized channels. Evidence: marketplace listing showing the credential at significant discount to official pricing, plus indication the sale violates the provider's terms of service. API keys are revocable — the consumer risks losing both money and access when the provider kills the key. Ordinary grey market goods (regional pricing differences) do not automatically qualify; the trigger requires credentials subject to remote revocation.
+
+Set grey_market_credential_resale to true only when evidence shows revocable credentials sold through unauthorized channels.
+
+CREDENTIAL HARVESTING
+
+Collecting login credentials for a third-party platform under the guise of providing a legitimate service. Evidence: the solicitation requests credentials for a platform the operator does not control, with no legitimate OAuth or API integration justifying the collection. Distinct from federal impersonation (government) — this covers platform credential phishing.
+
+Set credential_harvesting to true only when evidence shows credential collection without legitimate integration.
+
+COORDINATED REVIEW FRAUD
+
+Purchased reviews, bot-generated testimonials, or synchronized review bursts designed to manipulate trust signals. Evidence: documented review purchase, identical review text across accounts, or statistically anomalous review timing. This matters because the scanner relies on review data as positive evidence — fabricated reviews compromise the trust assessment.
+
+Set coordinated_review_fraud to true only when evidence establishes review manipulation.
+
+DATA BROKERAGE
+
+The operator's primary revenue comes from collecting user data and selling it to third parties without clear disclosure. Evidence: privacy policy showing data sale provisions combined with the product being free or underpriced relative to data collection. Distinct from Personal Data Exposure factor (which measures collection) — this is about hidden monetization of that data.
+
+Set data_brokerage to true only when evidence shows undisclosed data sale as the business model.
+
+SUBSCRIPTION DARK PATTERNS
+
+Deliberately making cancellation difficult: hiding the cancel button, requiring phone calls, multi-step mazes, or endless confirmation loops. Evidence: documented cancellation flow showing obstructive steps, or consumer complaints specifically about inability to cancel. Ordinary confusing UX does not qualify; requires evidence of intentional obstruction.
+
+Set subscription_dark_patterns to true only when evidence shows deliberate cancellation obstruction.
+
+RECRUITMENT-GATED EARNINGS
+
+Requiring users to recruit others to unlock earnings, withdrawals, or benefits. Evidence: terms or UI showing earnings contingent on bringing in new users. Distinct from withdrawal gate (pay to withdraw) — this is recruit to earn, with mathematical certainty of collapse requiring exponential growth.
+
+Set recruitment_gated_earnings to true only when evidence shows earnings gated behind recruitment.
+
+BRAND IMPERSONATION (NON-GOVERNMENT)
+
+Impersonating a well-known commercial brand (tech company, bank, retailer) to gain trust. Evidence: use of a brand's logo, name, or trade dress by an unaffiliated entity with intent to gain trust or credentials. The federal impersonation trigger covers government; this covers commercial brands.
+
+Set brand_impersonation to true only when evidence shows unauthorized commercial brand use for trust exploitation.
+
+EXTORTION MECHANICS
+
+Threatening to expose user data, lock access, or cause harm unless payment is made. Evidence: documented threat tying payment to prevention of harm. Distinct from advance fee (pay to get something) — this is pay to prevent something bad.
+
+Set extortion_mechanics to true only when evidence establishes a payment-for-prevention threat.
 
 CONSUMER CARD STYLE
 

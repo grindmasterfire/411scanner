@@ -30,7 +30,15 @@ const FLOOR_RAISER_FIELDS = [
   "near_threshold_suspension",
   "withdrawal_gate",
   "ip_hostage_lock_in",
-  "ad_arbitrage_mfa_lure"
+  "ad_arbitrage_mfa_lure",
+  "grey_market_credential_resale",
+  "credential_harvesting",
+  "coordinated_review_fraud",
+  "data_brokerage",
+  "subscription_dark_patterns",
+  "recruitment_gated_earnings",
+  "brand_impersonation",
+  "extortion_mechanics"
 ];
 
 const ACTION_CONTEXT_FIELDS = [
@@ -99,7 +107,15 @@ const FLOOR_RAISER_SCHEMA = {
     near_threshold_suspension: { type: "boolean" },
     withdrawal_gate: { type: "boolean" },
     ip_hostage_lock_in: { type: "boolean" },
-    ad_arbitrage_mfa_lure: { type: "boolean" }
+    ad_arbitrage_mfa_lure: { type: "boolean" },
+    grey_market_credential_resale: { type: "boolean" },
+    credential_harvesting: { type: "boolean" },
+    coordinated_review_fraud: { type: "boolean" },
+    data_brokerage: { type: "boolean" },
+    subscription_dark_patterns: { type: "boolean" },
+    recruitment_gated_earnings: { type: "boolean" },
+    brand_impersonation: { type: "boolean" },
+    extortion_mechanics: { type: "boolean" }
   },
 
   required:
@@ -132,6 +148,30 @@ const FLOOR_RAISER_EVIDENCE_SCHEMA = {
       EVIDENCE_LIST_SCHEMA,
 
     ad_arbitrage_mfa_lure:
+      EVIDENCE_LIST_SCHEMA,
+
+    grey_market_credential_resale:
+      EVIDENCE_LIST_SCHEMA,
+
+    credential_harvesting:
+      EVIDENCE_LIST_SCHEMA,
+
+    coordinated_review_fraud:
+      EVIDENCE_LIST_SCHEMA,
+
+    data_brokerage:
+      EVIDENCE_LIST_SCHEMA,
+
+    subscription_dark_patterns:
+      EVIDENCE_LIST_SCHEMA,
+
+    recruitment_gated_earnings:
+      EVIDENCE_LIST_SCHEMA,
+
+    brand_impersonation:
+      EVIDENCE_LIST_SCHEMA,
+
+    extortion_mechanics:
       EVIDENCE_LIST_SCHEMA
   },
 
