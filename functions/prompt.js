@@ -1086,7 +1086,13 @@ Use source_url only for a real source encountered during current grounded resear
 
 CRITICAL: Every VERIFIED receipt MUST have a source_url. If you verified a fact from grounded research, you MUST include the URL where you found it. A VERIFIED receipt without a source_url is incomplete and will be rejected.
 
-When a field does not have an applicable authority, subject, identifier, or source URL, return an empty string for that value rather than inventing one. However, if the status is VERIFIED, the source_url must not be empty — you must have a source for every verified claim.
+The source_url must be the SPECIFIC PAGE where the evidence was found — not the target's homepage, not the root domain. For example:
+- Legal entity from a corporate registry → the registry page URL, not the company's homepage
+- BBB record → the BBB profile URL, not the company's website
+- FTC record → the FTC page URL, not the company's website
+- Registrar from WHOIS → the WHOIS lookup URL, not the domain itself
+
+Using the target website as the source_url for facts about the target is circular and invalid. The source must be independent evidence.
 
 A model-written URL does not establish verification by itself.
 
