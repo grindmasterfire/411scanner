@@ -807,6 +807,80 @@ function applyMeasuredLedger(report, probe) {
   if (probe.subdomains && !infra.subdomains) {
     infra.subdomains = probe.subdomains;
   }
+
+  /*
+   * Server-side probe receipt stamping.
+   * WHY: Probe data is deterministic — it must never go through the LLM.
+   * We create VERIFIED evidence receipts directly from measured values,
+   * bypassing Gemini entirely. Added 2026-10-10 to replace the
+   * PROBE-MEASURED prompt instructions (removed from prompt.js).
+   */
+  const receipts = ledger.evidence_receipts || (ledger.evidence_receipts = []);
+  const existingFields = new Set(receipts.map((r) => r.field));
+  const domain = probe.domain || "";
+
+  function stampProbeReceipt(field, finding) {
+    if (!finding || existingFields.has(field)) return;
+    receipts.push({
+      field,
+      status: "verified",
+      finding,
+      authority: "Network Probe",
+      source_url: "",
+      subject: domain,
+    });
+    existingFields.add(field);
+  }
+
+  if (infra.ip_addresses && infra.ip_addresses.length > 0) {
+    stampProbeReceipt(
+      "infrastructure.ip_addresses",
+      `Resolved IP addresses: ${infra.ip_addresses.join(", ")}`
+    );
+  }
+  if (infra.mail_servers && infra.mail_servers.length > 0) {
+    stampProbeReceipt(
+      "infrastructure.mail_servers",
+      `Mail exchangers: ${infra.mail_servers.join(", ")}`
+    );
+  }
+  if (infra.dmarc_record) {
+    stampProbeReceipt(
+      "infrastructure.dmarc_record",
+      `DMARC record: ${infra.dmarc_record}`
+    );
+  }
+  if (infra.spf_record) {
+    stampProbeReceipt(
+      "infrastructure.spf_record",
+      `SPF record: ${infra.spf_record}`
+    );
+  }
+  if (infra.tracking_ids && infra.tracking_ids.length > 0) {
+    stampProbeReceipt(
+      "infrastructure.tracking_ids",
+      `Tracking IDs: ${infra.tracking_ids.join(", ")}`
+    );
+  }
+  if (infra.subdomains && infra.subdomains.length > 0) {
+    stampProbeReceipt(
+      "infrastructure.subdomains",
+      `Discovered subdomains: ${infra.subdomains.join(", ")}`
+    );
+  }
+  if (infra.asn) {
+    stampProbeReceipt(
+      "infrastructure.asn",
+      `ASN: ${infra.asn}${infra.asn_organization ? ` (${infra.asn_organization})` : ""}`
+    );
+  }
+  if (telemetry.tls_certificate_status) {
+    stampProbeReceipt(
+      "infrastructure.tls_issuer",
+      `TLS certificate status: ${telemetry.tls_certificate_status}`
+    );
+  }
+
   return report;
 }
 
