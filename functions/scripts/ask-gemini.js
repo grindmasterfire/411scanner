@@ -68,7 +68,8 @@ async function loadScan(requestId) {
   return { receipt, report: cacheDoc.data(), requestId: targetId };
 }
 
-function buildContext(receipt, report) {
+function buildContext(receipt, cached) {
+  const report = cached.report || cached;
   const ledger = report.technical_ledger || {};
   const receipts = ledger.evidence_receipts || [];
 
