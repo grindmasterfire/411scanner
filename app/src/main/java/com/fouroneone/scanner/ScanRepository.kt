@@ -303,10 +303,13 @@ object ScanRepository {
                     "application/json; charset=utf-8".toMediaType()
                 )
 
-            val request = Request.Builder()
+            // WHY: identify the caller for entitlement check. Without auth, backend can't verify top-up credits.
+            val idToken = AuthManager.currentIdToken()
+            val reqBuilder = Request.Builder()
                 .url(DEEP_DIVE_URL)
                 .post(requestBody)
-                .build()
+            if (idToken != null) reqBuilder.header("Authorization", "Bearer $idToken")
+            val request = reqBuilder.build()
 
             val response =
                 httpClient.newCall(request).execute()
