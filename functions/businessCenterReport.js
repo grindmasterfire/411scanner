@@ -730,6 +730,8 @@ function buildDeepDiveSummary(
   let tokenCostUsd = 0;
   let promptTokens = 0;
   let outputTokens = 0;
+  let googleSearchQueries = 0;
+  let groundingCostUsd = 0;
 
   for (const receipt of receipts) {
     total += 1;
@@ -748,6 +750,12 @@ function buildDeepDiveSummary(
     outputTokens += number(
       receipt?.outputTokens
     );
+    googleSearchQueries += number(
+      receipt?.googleSearchQueries
+    );
+    groundingCostUsd += number(
+      receipt?.groundingCostUsd
+    );
   }
 
   return {
@@ -761,6 +769,8 @@ function buildDeepDiveSummary(
     tokenCostUsd,
     promptTokens,
     outputTokens,
+    googleSearchQueries,
+    groundingCostUsd,
     // Every dive costs exactly 1 top-up credit, hit or miss, success or
     // failure — the credit is consumed before the cache/Gemini lookup.
     creditsConsumed: total,
@@ -786,8 +796,10 @@ function formatDeepDiveSummary(
     `AI token cost: ${money(summary.tokenCostUsd)}`,
     `Prompt tokens: ${integer(summary.promptTokens)}`,
     `Output tokens: ${integer(summary.outputTokens)}`,
+    `Google searches: ${integer(summary.googleSearchQueries)}`,
+    `Google grounding cost: ${money(summary.groundingCostUsd)}`,
     "In plain terms: how many deep dives ran, how many were served from",
-    "cache for free, and what the AI calls cost. Every dive burns one",
+    "cache for free, and what the AI calls and web searches cost. Every dive burns one",
     "top-up credit — that is the revenue; the token cost is the expense.",
     "========================================",
   ];

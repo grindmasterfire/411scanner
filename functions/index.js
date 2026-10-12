@@ -126,6 +126,16 @@ async function recordDeepDiveReceipt(
         totalTokens:
           usage.totalTokenCount || 0,
         tokenCostUsd: cost,
+        googleSearchQueries:
+          cacheHit
+            ? 0
+            : usage.googleSearchQueryCount || 0,
+        groundingCostUsd:
+          cacheHit
+            ? 0
+            : usage.groundingCostUsd || 0,
+        groundingRateVersion:
+          usage.groundingRateVersion || null,
         failureCode5:
           failureCode5 || null,
       });
