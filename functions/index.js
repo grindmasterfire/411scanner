@@ -266,8 +266,8 @@ exports.deepDive = onCall(
 
     const cachedDeepDive =
       await getCachedDeepDive(
-        cacheKey,
-        targetName
+        db,
+        cacheKey
       );
 
     if (cachedDeepDive) {
@@ -281,7 +281,7 @@ exports.deepDive = onCall(
       );
       return {
         deepDive:
-          cachedDeepDive,
+          cachedDeepDive.text,
 
         cache: {
           hit: true,
@@ -343,9 +343,10 @@ exports.deepDive = onCall(
     );
 
     await setCachedDeepDive(
+      db,
       cacheKey,
-      targetName,
-      text
+      text,
+      telemetry
     );
 
     return {

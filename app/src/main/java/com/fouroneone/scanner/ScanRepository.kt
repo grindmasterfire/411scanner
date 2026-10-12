@@ -254,47 +254,49 @@ object ScanRepository {
                 put("data", JSONObject().apply {
                     put("cacheKey", report.cacheKey)
                     put("targetName", report.consumerCard.targetName)
-                    put(
-                        "actionMeterScore",
-                        report.consumerCard.actionMeterScore
-                    )
-                    put(
-                        "verdictLabel",
-                        report.consumerCard.verdictLabel
-                    )
-                    put(
-                        "essential411",
-                        report.consumerCard.essential411
-                    )
-                    put(
-                        "classificationBadges",
-                        report.consumerCard.classificationBadges
-                            .joinToString(", ")
-                    )
-                    put(
-                        "revenueModel",
-                        report.technicalLedger
-                            .monetization
-                            .revenueModel
-                    )
-                    put(
-                        "pricing",
-                        report.technicalLedger
-                            .monetization
-                            .pricing
-                    )
-                    put(
-                        "complaintPattern",
-                        report.technicalLedger
-                            .regulatoryRecord
-                            .complaintPattern
-                    )
-                    put(
-                        "reviewSpread",
-                        report.technicalLedger
-                            .regulatoryRecord
-                            .reviewSpread
-                    )
+                    put("report", JSONObject().apply {
+                        put(
+                            "actionMeterScore",
+                            report.consumerCard.actionMeterScore
+                        )
+                        put(
+                            "verdictLabel",
+                            report.consumerCard.verdictLabel
+                        )
+                        put(
+                            "essential411",
+                            report.consumerCard.essential411
+                        )
+                        put(
+                            "classificationBadges",
+                            report.consumerCard.classificationBadges
+                                .joinToString(", ")
+                        )
+                        put(
+                            "revenueModel",
+                            report.technicalLedger
+                                .monetization
+                                .revenueModel
+                        )
+                        put(
+                            "pricing",
+                            report.technicalLedger
+                                .monetization
+                                .pricing
+                        )
+                        put(
+                            "complaintPattern",
+                            report.technicalLedger
+                                .regulatoryRecord
+                                .complaintPattern
+                        )
+                        put(
+                            "reviewSpread",
+                            report.technicalLedger
+                                .regulatoryRecord
+                                .reviewSpread
+                        )
+                    })
                 })
             }
 
@@ -327,8 +329,10 @@ object ScanRepository {
             val json = JSONObject(body)
 
             when {
-                json.has("result") ->
-                    json.optString("result", "")
+                json.has("result") -> {
+                    val resultObj = json.optJSONObject("result")
+                    resultObj?.optString("deepDive", "") ?: ""
+                }
 
                 json.has("text") ->
                     json.optString("text", "")

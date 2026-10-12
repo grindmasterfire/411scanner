@@ -51,14 +51,29 @@ object ScanReportParser {
                         root
                     ),
                 cacheKey =
-                    root.optString(
-                        "cacheKey",
-                        ""
+                    resolveCacheKey(
+                        root
                     )
             )
         } catch (_: Exception) {
             null
         }
+    }
+
+    /**
+     * The backend returns the scan cache identity as cache.key, either
+     * at the root (polled result) or inside the callable result envelope.
+     */
+    private fun resolveCacheKey(
+        root: JSONObject
+    ): String {
+        val envelope =
+            root.optJSONObject("result") ?: root
+
+        return envelope.optJSONObject("cache")
+            ?.optString("key", "")
+            ?.takeIf { it.isNotBlank() }
+            ?: root.optString("cacheKey", "")
     }
 
     /**
