@@ -66,6 +66,36 @@ const {
   consumeScan,
 } = require("./entitlementStore");
 
+// App-store listing hosts: valid scan targets, but never probe targets.
+const PLATFORM_LISTING_HOSTS = [
+  "play.google.com",
+  "apps.apple.com",
+  "itunes.apple.com",
+];
+
+function isPlatformListing(candidate) {
+  let host = String(candidate || "").trim().toLowerCase();
+  if (host.includes("://")) {
+    try {
+      host = new URL(host).hostname;
+    } catch (e) {
+      return false;
+    }
+  }
+  host = host.split("/")[0].split(":")[0].replace(/^www\./, "");
+  return PLATFORM_LISTING_HOSTS.includes(host);
+}
+
+const EMPTY_NAMES = ["", "unknown", "n/a", "na", "none", "null", "unidentified"];
+
+function hasEntityName(report) {
+  const identity = (report && report.solicitation_identity) || {};
+  const attribution =
+    (report && report.technical_ledger && report.technical_ledger.attribution) || {};
+  return [identity.canonical_name, identity.operator, attribution.operator_name]
+    .some((n) => !EMPTY_NAMES.includes(String(n || "").trim().toLowerCase()));
+}
+
 /**
  * Execute one production scan.
  *
@@ -120,6 +150,41 @@ async function executeScan(
         "Your family admin has restricted scanning for your account."
       );
     }
+    throw new HttpsError(
+      "resource-exhausted",
+      "You've used all your scans for this billing period."
+    );
+  }
+
+  /*
+   * Every validated attempt is counted from here — before cache lookup or
+   * any Gemini call — so aborted scans (e.g. no target) cannot be replayed
+   * for free. Transaction contention is transient: retry the deduction with
+   * backoff. If the deduction still fails (race lost, restriction, or a
+   * persistent ledger error), fail closed: nothing has been spent yet, and
+   * an uncounted scan is free compute. Only "free" (no bucket) and
+   * "no_uid" proceed, since those callers have no ledger to deduct from.
+   */
+  let consumeResult = await consumeScan(db, uid);
+  for (
+    let attempt = 0;
+    attempt < 3 &&
+    !consumeResult.consumed &&
+    consumeResult.reason === "error";
+    attempt++
+  ) {
+    await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
+    consumeResult = await consumeScan(db, uid);
+  }
+  if (
+    !consumeResult.consumed &&
+    consumeResult.reason !== "free" &&
+    consumeResult.reason !== "no_uid"
+  ) {
+    console.warn(
+      `[scan] ledger consume failed (${consumeResult.reason}); ` +
+        `scan ${requestId} rejected.`
+    );
     throw new HttpsError(
       "resource-exhausted",
       "You've used all your scans for this billing period."
@@ -338,8 +403,9 @@ async function executeScan(
 
     /*
      * T03 — Provider failure resilience.
-     * Gemini 503 / 429 / timeout must not burn user entitlements.
-     * Return "unavailable" so the client can offer a free retry.
+     * Gemini 503 / 429 / timeout returns "unavailable" so the client can
+     * offer a retry. The attempt was already counted at the gate: no free
+     * retries, because "not counted" failures are an exploitable surface.
      * Uses the shared transient-error classifier from geminiEngine
      * (covers 500/503/429/timeout/reset/hangup/fetch-failed).
      */
@@ -349,7 +415,7 @@ async function executeScan(
       throw new HttpsError(
         "unavailable",
         "The analysis provider is temporarily " +
-        "unavailable. Your scan was not counted. " +
+        "unavailable. This attempt was counted against your quota. " +
         "Please try again in a moment."
       );
     }
@@ -374,38 +440,49 @@ async function executeScan(
   applyRedirectPath(report, linkEvidence);
   let probeStatus = probe && probe.measured ? "measured" : "bypassed_no_target";
 
-  // Fallback: OCR gave no URL, but the model identified a domain. Probe that
-  // domain and re-apply so the Technical 411 fills whenever a domain is known.
+  // Fallback: OCR gave no URL, but the model resolved a target (from the
+  // image or by grounded search on the entity name). Probe that domain and
+  // re-apply so the Technical 411 fills whenever a domain is known.
   if (!probe || !probe.measured) {
     const tl = report.technical_ledger || {};
-    const candidate =
-      (tl.network_telemetry && tl.network_telemetry.app_package_or_domain) ||
-      (tl.attribution && tl.attribution.official_domain) ||
-      (report.solicitation_identity &&
-        report.solicitation_identity.destination_domain) ||
-      "";
-    if (candidate && String(candidate).includes(".")) {
-      const fallbackProbe = await runNetworkProbe(null, candidate);
+    const identity = report.solicitation_identity || {};
+    const candidates = [
+      tl.network_telemetry && tl.network_telemetry.app_package_or_domain,
+      tl.attribution && tl.attribution.official_domain,
+      identity.destination_domain,
+    ].filter((c) => c && String(c).includes("."));
+
+    if (candidates.some(isPlatformListing)) {
+      // Probing Google's/Apple's infrastructure says nothing about the app
+      // behind the listing; proceed on OSINT + model analysis instead.
+      probeStatus = "platform_target_no_probe";
+    } else if (candidates.length) {
+      const fallbackProbe = await runNetworkProbe(null, candidates[0]);
       if (fallbackProbe && fallbackProbe.measured) {
         applyMeasuredLedger(report, fallbackProbe);
         probeStatus = "fallback_measured";
+      } else {
+        probeStatus = "fallback_unmeasured";
       }
+    } else if (hasEntityName(report)) {
+      probeStatus = "entity_only_no_target";
     }
   }
   telemetry.probe_status = probeStatus;
 
   /*
-   * Guard: Abort empty scans before billing and persistence.
-   * If the probe was bypassed (no target from OCR) and the fallback
-   * probe also found no domain from Gemini's analysis, the scan has
-   * no technical facts to evaluate. Proceeding would charge the customer
-   * for an empty result and waste AI API costs.
-   * Added 2026-10-10 per Gemini interrogator diagnosis.
+   * Guard: Abort truly unidentifiable scans before billing and persistence.
+   * Only reached when OCR found no target, the model resolved no
+   * destination (even via grounded search), and no entity name was
+   * extracted — there is nothing to evaluate. The attempt was already
+   * counted at the gate, so aborting here cannot be replayed for free.
+   * Added 2026-10-10 per Gemini interrogator diagnosis; narrowed 2026-10-13
+   * so identified entities without a probeable domain still proceed.
    */
   if (probeStatus === "bypassed_no_target") {
     throw new HttpsError(
       "failed-precondition",
-      "Scan aborted: no target domain could be identified from the image or analysis. No charges applied."
+      "Scan aborted: no target domain could be identified from the image or analysis. This attempt was counted against your quota."
     );
   }
 
@@ -507,31 +584,12 @@ async function executeScan(
   return scanResult;
   })();
 
-  /*
-   * The scan already ran: the ledger write must land. Transaction
-   * contention is transient — retry the deduction (not the scan) with
-   * backoff. quota_exhausted needs no retry (nothing left to deduct).
-   */
-  let consumeResult = await consumeScan(db, uid);
-  for (
-    let attempt = 0;
-    attempt < 3 &&
-    !consumeResult.consumed &&
-    consumeResult.reason === "error";
-    attempt++
-  ) {
-    await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
-    consumeResult = await consumeScan(db, uid);
-  }
-  if (!consumeResult.consumed) {
-    console.warn(
-      `[scan] ledger consume failed (${consumeResult.reason}); ` +
-        `scan ${requestId} served but uncounted.`
-    );
-  }
   return __result;
 }
 
 module.exports = {
   executeScan,
+  // test hooks
+  _isPlatformListing: isPlatformListing,
+  _hasEntityName: hasEntityName,
 };

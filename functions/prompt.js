@@ -304,6 +304,24 @@ Do not begin the web crawl, diagnostic analysis, or scoring until the primary ta
 
 Do not score yet.
 
+STEP 1B — RESOLVE THE DESTINATION WHEN NO URL IS VISIBLE
+
+Extraction from the image is step one. Resolving the destination is step two.
+
+When the image shows no URL, domain, or package identifier, the visible entity name is still a resolvable target. Use grounded web search on the extracted entity name (game, app, product, brand, company, or operator), combined with any distinguishing visible detail such as the developer, tagline, art style, or offer, to find the actual destination the solicitation leads to.
+
+Resolve in this order:
+
+1. The official website of the entity
+2. The official app store listing: a Google Play listing (play.google.com/store/apps/details?id=<package>) or an Apple App Store listing (apps.apple.com/...)
+3. Another official, evidence-supported destination for the solicitation
+
+Populate solicitation_identity.destination_domain with the resolved host (for example, the official domain, play.google.com, or apps.apple.com) and solicitation_identity.destination_path with the path and query that identifies the listing (for example, /store/apps/details?id=com.example.game). When the resolved target is an app store listing, also record the package or bundle identifier in technical_ledger.network_telemetry.app_package_or_domain.
+
+Never leave destination_domain empty when grounded search can resolve the entity to a destination. Return an empty destination_domain only when no entity name can be extracted from the image, or when search genuinely resolves nothing for the extracted name.
+
+Do not substitute a similarly named but different entity. If search returns several candidates, choose the one matching the visible evidence and preserve the ambiguity in secondary_targets_note.
+
 STEP 2 — RECONSTRUCT AND RESEARCH THE SOLICITATION
 
 The screenshot is the starting point, not the complete investigation.

@@ -168,6 +168,24 @@ Verify the material claims needed for this 411, including target identity, offic
 If a fact cannot be established, mark it unresolved, not found, not applicable, or not researched as appropriate rather than assuming it.
 `;
 
+/*
+ * Final-turn search directive. Sent as the LAST content part, after the
+ * image, so it is the instruction nearest to generation (the long system
+ * prompt buries the same rule). The per-attempt nonce makes every retry a
+ * distinct request instead of a repeat of the one that just skipped search.
+ */
+function buildFinalSearchDirective(attemptNumber) {
+  const nonce =
+    `${attemptNumber}-${Date.now().toString(36)}-` +
+    Math.random().toString(36).slice(2, 10);
+  return (
+    "RUN GOOGLE SEARCH NOW. Before writing anything, invoke Google Search " +
+    "on the target identified in the image above (its name, operator, and " +
+    "destination) and build the dossier from those live results, not from " +
+    `training memory. [attempt ${nonce}]`
+  );
+}
+
 /**
  * Pass 1 output directive. Forces prose evidence dossier instead of JSON
  * so the model's full search-query generation budget is available.
@@ -680,6 +698,7 @@ Do not generate Deep Dive.`;
           await researchModel.generateContent([
             requestPrompt,
             imagePart,
+            buildFinalSearchDirective(attemptNumber),
           ]);
 
         const telemetry =
