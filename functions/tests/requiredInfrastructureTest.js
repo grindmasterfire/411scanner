@@ -102,12 +102,16 @@ test("D&B matched by name variants and its own domain", () => {
   assert.equal(applyRequiredInfrastructure(onPlay, { getVerdict }).status, "confirmed");
 });
 
-test("a cap, never a floor: D&B already below 7.9 stays as scored", () => {
-  const result = dnbResult({ action_meter_score: 6.2, verdict_label: "NOT FOR EVERYONE" });
+test("manual entry: D&B shows 7.9 whatever the scan scored (the 7.2 scan)", () => {
+  const result = dnbResult({ action_meter_score: 7.2, verdict_label: "PROFESSIONAL CONSIDERATION ONLY" });
   const out = applyRequiredInfrastructure(result, { getVerdict });
-  assert.equal(out.applied, false);
-  assert.equal(result.report.consumer_card.action_meter_score, 6.2);
-  assert.equal(result.report.consumer_card.verdict_label, "NOT FOR EVERYONE");
+  assert.equal(out.applied, true);
+  assert.equal(result.report.consumer_card.action_meter_score, 7.9);
+  assert.equal(result.report.consumer_card.verdict_label, "PROFESSIONAL CONSIDERATION ONLY");
+  assert.equal(result.report.consumer_card.required_infrastructure.evidence_based_score, 7.2);
+  const high = dnbResult({ action_meter_score: 9.3 });
+  applyRequiredInfrastructure(high, { getVerdict });
+  assert.equal(high.report.consumer_card.action_meter_score, 7.9);
 });
 
 test("impersonator: brand-impersonation floor raiser blocks the exception", () => {
@@ -130,31 +134,44 @@ test("no false matches: other 'D&B' names are not Dun & Bradstreet", () => {
   assert.equal(matchRequiredInfrastructure({ target_name: "DUNS number lookup service" }), null);
 });
 
-test("model proposal for an unlisted entity: candidate only, nothing changes", () => {
-  const result = {
-    report: {
-      consumer_card: {
-        target_name: "Some Utility",
-        developer_or_entity: "Some Utility Co.",
-        action_meter_score: 8.6,
-        verdict_label: "DELETE FROM DEVICE AND REPORT",
-        action_meter_context: {
-          required_infrastructure: true,
-          evidence: { required_infrastructure: ["Sole regulated provider in the region."] },
-        },
-      },
-    },
-  };
-  const out = applyRequiredInfrastructure(result, { getVerdict });
-  assert.equal(out.status, "candidate");
-  assert.equal(result.report.consumer_card.action_meter_score, 8.6);
-  assert.equal(result.report.consumer_card.required_infrastructure.status, "candidate");
+test("the evaluation is never told about required infrastructure", () => {
+  const prompt = JSON.stringify(require("../prompt"));
+  const schema = JSON.stringify(require("../consumerCardSchema"));
+  assert.ok(!/required.infrastructure/i.test(prompt), "prompt must not mention it");
+  assert.ok(!/required_infrastructure/.test(schema), "schema must not carry it");
 });
 
-test("no match and no proposal: report untouched", () => {
+test("no match: report untouched", () => {
   const result = { report: { consumer_card: { target_name: "Random App", action_meter_score: 8.7 } } };
   assert.equal(applyRequiredInfrastructure(result, { getVerdict }), null);
   assert.equal(result.report.consumer_card.required_infrastructure, undefined);
+});
+
+/* What the phone receives -------------------------------------------- */
+
+test("client view: report and cache key only; no model, tokens, or internals", () => {
+  const full = dnbResult();
+  applyRequiredInfrastructure(full, { getVerdict });
+  Object.assign(full, {
+    cache: { hit: true, fresh: true, mode: "cross_creative", key: "abc123", candidate: { overlap: 0.9 } },
+    telemetry: { model: "gemini-x", totalTokenCount: 60757 },
+    receipt: { model: "gemini-x", usage: { totalTokens: 60757 }, pricing: {} },
+    composition: { bands: [] },
+    solicitationIdentity: { key: "identity_x" },
+    identityHistory: [{ state: 1 }],
+  });
+  const view = wf._clientView(full);
+  assert.deepEqual(Object.keys(view).sort(), ["cache", "report"]);
+  assert.deepEqual(view.cache, { key: "abc123" });
+  const text = JSON.stringify(view);
+  for (const leak of ["gemini-x", "60757", "cross_creative", "identity_x", "evidence_based_score", "instructions"]) {
+    assert.ok(!text.includes(leak), `client view leaks ${leak}`);
+  }
+  assert.deepEqual(view.report.consumer_card.required_infrastructure,
+    { status: "confirmed", applied: true, entity: "Dun & Bradstreet, Inc." });
+  assert.equal(view.report.consumer_card.action_meter_score, 7.9);
+  // The server-side object keeps everything for the Business Center.
+  assert.equal(full.report.consumer_card.required_infrastructure.evidence_based_score, 8.5);
 });
 
 let passed = 0;

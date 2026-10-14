@@ -99,7 +99,6 @@ data class ScanReport(
     val solicitationPattern: SolicitationPattern = SolicitationPattern(),
     val technicalLedger: TechnicalLedger = TechnicalLedger(),
     val alternatives: Alternatives = Alternatives(),
-    val telemetry: ScanTelemetry? = null,
     val cacheKey: String = ""
 ) {
     companion object {

@@ -142,22 +142,6 @@ object ScanReportSectionParser {
         )
     }
 
-    fun parseTelemetry(root: JSONObject): ScanTelemetry? {
-        val source = root.optJSONObject("telemetry") ?: return null
-
-        return ScanTelemetry(
-            operation = source.optString("operation", ""),
-            model = source.optString("model", ""),
-            promptTokenCount = source.optInt("promptTokenCount", 0),
-            candidatesTokenCount = source.optInt("candidatesTokenCount", 0),
-            totalTokenCount = source.optInt("totalTokenCount", 0),
-            cachedContentTokenCount = source.optInt("cachedContentTokenCount", 0),
-            thoughtsTokenCount = source.optInt("thoughtsTokenCount", 0),
-            finishReason = nullableString(source, "finishReason")
-        )
-    }
-
-
     private fun metricIntOrNull(
         source: JSONObject,
         key: String

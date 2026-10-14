@@ -733,10 +733,13 @@ async function executeScan(
   scanFacts.infrastructure = applyRequiredInfrastructure(__result, { getVerdict });
 
   // Resumable scans: every delivered path, cache hits included.
-  await storeScanOutcome(db, serverTimestamp, requestId, uid, __result);
+  // Stored and returned as the client view: the replay and getScanResult
+  // paths hand back exactly what the phone may see.
+  const delivered = clientView(__result);
+  await storeScanOutcome(db, serverTimestamp, requestId, uid, delivered);
   await recordCompletion({ ok: true, code5: null });
 
-  return __result;
+  return delivered;
 }
 
 /**
@@ -839,6 +842,26 @@ function replayScanRequest(existing, uid) {
 }
 
 /*
+ * What the phone receives: the report and the cache key (Deep Dive needs
+ * it). Model names, token counts, pricing, cache mechanics, identity
+ * internals, and exception internals stay server-side; the Business
+ * Center reads them from receipts and investigations. An OSINT tool's
+ * users include bad actors: nothing about how the scanner works leaves it.
+ */
+function clientView(result) {
+  if (!result || !result.report) return result;
+  const report = { ...result.report };
+  const ri = report.consumer_card?.required_infrastructure;
+  if (ri) {
+    report.consumer_card = {
+      ...report.consumer_card,
+      required_infrastructure: { status: ri.status, applied: ri.applied === true, entity: ri.entity },
+    };
+  }
+  return { report, cache: { key: result.cache?.key || null } };
+}
+
+/*
  * One action ladder everywhere: a report cached before the ladder changed
  * carries an old verdict label. Re-derive label and badge from the score
  * (the score itself is untouched).
@@ -872,6 +895,7 @@ module.exports = {
   _scanFailureOutcome: scanFailureOutcome,
   _claimScanRequest: claimScanRequest,
   _relabelVerdict: relabelVerdict,
+  _clientView: clientView,
   _replayScanRequest: replayScanRequest,
   SCAN_CLAIM_STALE_MS,
   _isPlatformListing: isPlatformListing,

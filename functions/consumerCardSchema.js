@@ -68,12 +68,6 @@ const ACTION_METER_CONTEXT_SCHEMA = {
       type: "boolean"
     },
 
-    // Optional (not in required): the model may propose; the server confirms
-    // only configured entities (requiredInfrastructure.js).
-    required_infrastructure: {
-      type: "boolean"
-    },
-
     evidence: {
       type: "object",
 
@@ -88,9 +82,6 @@ const ACTION_METER_CONTEXT_SCHEMA = {
           EVIDENCE_LIST_SCHEMA,
 
         consumer_disengagement_boundary:
-          EVIDENCE_LIST_SCHEMA,
-
-        required_infrastructure:
           EVIDENCE_LIST_SCHEMA
       },
 

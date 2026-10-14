@@ -123,7 +123,6 @@ fun ResultScreen(
             when (selectedTabIndex) {
                 0 -> ConsumerCardTab(
                     consumerCard = report.consumerCard,
-                    telemetry = report.telemetry,
                     onRequestDeepDive = onRequestDeepDive
                 )
 

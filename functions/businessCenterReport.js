@@ -264,6 +264,11 @@ function buildBusinessSummary(receipts = []) {
     requestCount:
       receipts.length,
 
+    // Struck receipts: the 411 was washed by owner ruling, the cost was
+    // real and stays in every total above and below.
+    struckRequests:
+      receipts.filter((r) => r?.struck?.struck === true).length,
+
     resolvedRequests,
 
     modes,
@@ -370,6 +375,7 @@ function formatBusinessSummary(
     `Grounding rejected: ${integer(summary.groundingRejectedRequests)}`,
     `Cache Bank reuses: ${integer(summary.cacheHits)}`,
     `Cache hit rate: ${(number(summary.cacheHitRate) * 100).toFixed(1)}%`,
+    `Struck (411 washed, cost counted): ${integer(summary.struckRequests)}`,
     "In plain terms: how many scans came in, how many produced a finished",
     "report, and how many were served from reports we already had.",
     "",

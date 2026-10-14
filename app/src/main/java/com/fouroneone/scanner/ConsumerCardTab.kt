@@ -3,9 +3,9 @@
  * @class: Class 3 (Feature Component)
  * @cap: 400 Lines
  * @responsibility: Render the primary Consumer 411 diagnostic surface,
- * calibration telemetry, Essential 411, and on-demand Deep Dive.
- * @dependencies: Jetpack Compose, ConsumerCard, ScanTelemetry,
- * ActionMeter, SixVectorGrid, ScanTelemetryReadout.
+ * Essential 411, and on-demand Deep Dive. Scan telemetry (model, tokens)
+ * is never shown to users; it lives in the Business Center.
+ * @dependencies: Jetpack Compose, ConsumerCard, ActionMeter, SixVectorGrid.
  * @security_gate: Presentation only. Diagnostic scoring and Deep Dive
  * generation remain outside this component.
  * @owner_context: 411 Scanner Consumer Card result surface.
@@ -62,7 +62,6 @@ import kotlinx.coroutines.launch
 @Composable
 fun ConsumerCardTab(
     consumerCard: ConsumerCard?,
-    telemetry: ScanTelemetry? = null,
     onRequestDeepDive: (suspend () -> String?)? = null
 ) {
     if (consumerCard == null) {
@@ -161,13 +160,6 @@ fun ConsumerCardTab(
             metrics = consumerCard.metrics,
             annotations = consumerCard.metricAnnotations
         )
-
-        // Calibration telemetry cannot alter diagnostic content.
-        if (telemetry != null) {
-            ScanTelemetryReadout(
-                telemetry = telemetry
-            )
-        }
 
         // Concise evidence-based consumer takeaway.
         Card(

@@ -13,6 +13,7 @@
  *
  * Usage:
  * node scripts/business-center.js last
+ * node scripts/business-center.js receipt <requestId>   one scan's model, tokens, cost
  * node scripts/business-center.js today
  * node scripts/business-center.js week
  * node scripts/business-center.js month
@@ -127,6 +128,15 @@ function printReceipt(receipt) {
   console.log(
     "========================================"
   );
+
+  if (receipt?.struck?.struck === true) {
+    console.log(
+      `STRUCK: ${receipt.struck.reason || "411 washed; cost retained."}`
+    );
+    console.log(
+      "The target and its 411 were removed; the cost below was real and is counted."
+    );
+  }
 
   console.log(
     `Timestamp: ${timestampText(receipt.createdAt)}`
@@ -322,6 +332,32 @@ async function readLastReceipt() {
   printReceipt(
     snapshot.docs[0].data()
   );
+}
+
+/*
+ * One scan's receipt by request ID: the model, token counts, searches, and
+ * cost that the app used to show as "scan telemetry" (moved here
+ * 2026-10-14; users never see how the scanner works).
+ */
+async function readReceipt(requestId) {
+  if (!requestId) {
+    throw new Error("Use: receipt <requestId>");
+  }
+
+  const snap =
+    await db
+      .collection("scan_receipts")
+      .doc(requestId)
+      .get();
+
+  if (!snap.exists) {
+    console.log(
+      `411 Business Center: no receipt for ${requestId}.`
+    );
+    return;
+  }
+
+  printReceipt(snap.data());
 }
 
 async function readPeriod(mode) {
@@ -710,6 +746,11 @@ async function main() {
     return;
   }
 
+  if (mode === "receipt") {
+    await readReceipt(process.argv[3]);
+    return;
+  }
+
   if (OPS_MODES.includes(mode)) {
     await runOpsReport(
       { db, admin, projectId: PROJECT_ID, getPeriodStart },
@@ -761,7 +802,7 @@ async function main() {
     )
   ) {
     throw new Error(
-      "Use one of: last, today, week, month, revenue [today|week|month], trend, " +
+      "Use one of: last, receipt <requestId>, today, week, month, revenue [today|week|month], trend, " +
         OPS_MODES.join(", ")
     );
   }

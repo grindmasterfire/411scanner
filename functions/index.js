@@ -342,10 +342,6 @@ exports.deepDive = onCall(
       return {
         deepDive:
           cachedDeepDive.text,
-
-        cache: {
-          hit: true,
-        },
       };
     }
 
@@ -409,15 +405,11 @@ exports.deepDive = onCall(
       telemetry
     );
 
+    // The phone gets the Deep Dive text only; telemetry stays in the
+    // deepdive receipt for the Business Center.
     return {
       deepDive:
         text,
-
-      cache: {
-        hit: false,
-      },
-
-      telemetry,
     };
   }
 );

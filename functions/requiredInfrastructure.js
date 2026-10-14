@@ -3,23 +3,23 @@
  * @class Class 1 (Focused Logic Component)
  * @cap 150 Lines
  * @responsibility Apply required-infrastructure exceptions (config/
- *   requiredInfrastructure.json) to a delivered report: cap the Action
- *   Meter at the entry's score with its instructions, and record what the
- *   evidence-based score was.
+ *   requiredInfrastructure.json) to a delivered report: a manual Action
+ *   Meter entry. A listed entity always shows the entry's score and
+ *   verdict, whatever the scan scored; the evaluated score is recorded.
  * @dependencies ./config/requiredInfrastructure.json, getVerdict (passed in)
  * @security_gate Changes only action_meter_score, the verdict, and adds a
  *   required_infrastructure block. Never removes or edits findings,
- *   metrics, evidence, or sources. Only lowers a score, never raises one.
+ *   metrics, evidence, or sources.
  *   Never applies to a possible impersonator: not when a fraud or
  *   impersonation floor raiser fired, and not when the target points to a
  *   domain that is not the entity's own (app stores excepted).
  * @owner_context 411 Scanner policy ruling 2026-10-14 (The D&B Dilemma):
  *   necessity changes the action, not the facts.
  *
- * Signal pattern: the model may propose required_infrastructure (with
- * evidence) in action_meter_context; the server confirms only entities on
- * the configured list. A proposal for an unlisted entity is recorded as a
- * candidate for human review and changes nothing.
+ * The evaluation never knows about this list: the model is not told
+ * about required infrastructure (it tipped the 8.0 boundary judgment,
+ * 2026-10-14), and the exception is applied only after scoring. Entries
+ * are added by people, in the config.
  */
 
 const CONFIG = require("./config/requiredInfrastructure.json");
@@ -84,32 +84,16 @@ function impersonationRisk(card, report, entry) {
   return foreign ? `foreign_domain:${foreign}` : null;
 }
 
-function modelProposal(card) {
-  const context = card?.action_meter_context || {};
-  const evidence = context.evidence?.required_infrastructure;
-  return {
-    proposed: context.required_infrastructure === true && Array.isArray(evidence) && evidence.length > 0,
-    evidence: Array.isArray(evidence) ? evidence.slice(0, 5) : [],
-  };
-}
-
 /**
  * Apply the exception to the report inside a scan result (fresh or cached;
  * both carry report.consumer_card). Mutates and returns a summary:
- * { status: "confirmed" | "candidate" | "blocked", entity, applied } or null.
+ * { status: "confirmed" | "blocked", entity, applied } or null.
  */
 function applyRequiredInfrastructure(result, { getVerdict, entries = CONFIG.entries } = {}) {
   const card = result?.report?.consumer_card || result?.consumer_card;
   if (!card || typeof getVerdict !== "function") return null;
-  const proposal = modelProposal(card);
   const entry = matchRequiredInfrastructure(card, entries);
-
-  if (!entry) {
-    if (!proposal.proposed) return null;
-    const entity = card.developer_or_entity || card.target_name || "unknown";
-    card.required_infrastructure = { status: "candidate", entity, evidence: proposal.evidence };
-    return { status: "candidate", entity, applied: false };
-  }
+  if (!entry) return null;
 
   const risk = impersonationRisk(card, result?.report, entry);
   if (risk) {
@@ -120,14 +104,13 @@ function applyRequiredInfrastructure(result, { getVerdict, entries = CONFIG.entr
 
   const original = Number(card.action_meter_score);
   const originalLabel = card.verdict_label || null;
-  // A cap, never a floor: a target already below the entry stays as scored.
-  const applied = Number.isFinite(original) && original > entry.score;
-  if (applied) {
-    const verdict = getVerdict(entry.score);
-    card.action_meter_score = entry.score;
-    card.action_verdict_badge = verdict.badge;
-    card.verdict_label = verdict.label;
-  }
+  // Manual entry (owner ruling 2026-10-14): the listed score is shown
+  // whatever the scan scored, above or below it.
+  const verdict = getVerdict(entry.score);
+  card.action_meter_score = entry.score;
+  card.action_verdict_badge = verdict.badge;
+  card.verdict_label = verdict.label;
+  const applied = true;
   card.required_infrastructure = {
     status: "confirmed",
     id: entry.id,
@@ -136,7 +119,6 @@ function applyRequiredInfrastructure(result, { getVerdict, entries = CONFIG.entr
     evidence_based_score: Number.isFinite(original) ? original : null,
     evidence_based_verdict: originalLabel,
     instructions: entry.instructions,
-    model_proposed: proposal.proposed,
   };
   return { status: "confirmed", entity: entry.entity, applied };
 }

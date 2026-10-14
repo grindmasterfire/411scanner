@@ -46,10 +46,6 @@ object ScanReportParser {
                     ScanReportSectionParser.parseAlternatives(
                         reportObj
                     ),
-                telemetry =
-                    ScanReportSectionParser.parseTelemetry(
-                        root
-                    ),
                 cacheKey =
                     resolveCacheKey(
                         root
