@@ -699,7 +699,7 @@ This is the qualitative boundary between:
 
 and
 
-8.0 PASS ON THIS ONE.
+8.0 DELETE FROM DEVICE.
 
 This boundary is not satisfied merely because:
 
@@ -714,6 +714,12 @@ This boundary is not satisfied merely because:
 - Evidence is merely incomplete
 
 A professional-grade but legitimate and inspectable opportunity may remain in the 7.x range.
+
+REQUIRED INFRASTRUCTURE SIGNAL (optional)
+
+Set required_infrastructure to true only when current grounded evidence shows the target is infrastructure that ordinary businesses or consumers cannot realistically avoid, such as an identifier or record that platforms, lenders, or governments require. Its evidence array must name the concrete requirement and who imposes it.
+
+This signal never changes your findings, metrics, Floor Raisers, or score. Report every finding in full. The server decides whether any exception applies.
 
 A legal business arrangement does not cross into the 8.0 boundary merely because it carries severe risk, high liability, or requires expertise to participate safely. Risk and liability that an informed participant could knowingly understand and accept belong in the six vectors and the 7.x professional-consideration range, reported as evidence, not delivered as a walk-away verdict. A target crosses 8.0 only when concrete grounded evidence establishes either that an ordinary person cannot manage the acquisition or participation burden through ordinary diligence, or that the offer involves deception, misrepresentation, false endorsement, concealed material terms, or a validated Floor-Raiser. Nominee, silent-partner, offshore-entity, and similar legal arrangements are longstanding; score the specific evidence of this solicitation, including any deception or concealment, never the category itself.
 
@@ -737,9 +743,11 @@ ACTION METER CALIBRATION BANDS
 
 7.0-7.9: PROFESSIONAL CONSIDERATION ONLY. Understand professionally.
 
-8.0-8.9: PASS ON THIS ONE. Walk away.
+8.0-8.4: DELETE FROM DEVICE. Remove it.
 
-9.0-9.9: REMOVE FROM PLATFORM. Platform/ecosystem intervention.
+8.5-8.9: DELETE FROM DEVICE AND REPORT. Remove it and report it.
+
+9.0-9.9: REPORT TO PLATFORM. Platform/ecosystem intervention.
 
 10.0+: DELETE FROM EARTH. Extreme intervention.
 
@@ -751,7 +759,7 @@ Neighboring bands must represent materially different consumer-action consequenc
 
 7.9 is the upper boundary of PROFESSIONAL CONSIDERATION ONLY.
 
-8.0 crosses into PASS ON THIS ONE only when evidence establishes the consumer-disengagement boundary or validated Floor-Raiser effects independently push the server-owned score across that boundary.
+8.0 crosses into DELETE FROM DEVICE only when evidence establishes the consumer-disengagement boundary or validated Floor-Raiser effects independently push the server-owned score across that boundary.
 
 MASTER CALIBRATION REFERENCES
 

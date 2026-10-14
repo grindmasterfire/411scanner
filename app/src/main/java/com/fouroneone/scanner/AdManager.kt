@@ -9,6 +9,8 @@ import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.FullScreenContentCallback
 import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.MobileAds
+import com.google.android.gms.ads.RequestConfiguration
+import com.google.android.gms.ads.rewarded.ServerSideVerificationOptions
 import com.google.android.gms.ads.rewardedinterstitial.RewardedInterstitialAd
 import com.google.android.gms.ads.rewardedinterstitial.RewardedInterstitialAdLoadCallback
 import java.util.Locale
@@ -21,21 +23,23 @@ object AdManager {
 
     private const val TAG = "411_AdManager"
 
-    // Google AdMob official sample Rewarded Interstitial test ad unit ID
-    // (debug builds only — never earns, never bills).
-    private const val SAMPLE_REWARDED_INTERSTITIAL_ID = "ca-app-pub-3940256099942544/5354046379"
-
-    // Production rewarded interstitial (release builds). Created 2026-10-07.
+    // Production rewarded interstitial. Created 2026-10-07. Server-side
+    // verification (admobSsv) is configured on this unit only.
     private const val PROD_REWARDED_INTERSTITIAL_ID = "ca-app-pub-1323472894046973/8930397909"
 
     /**
-     * Debug builds always use Google's sample ID so testing never touches
-     * production ads (or generates invalid traffic). Release builds use
-     * the production unit.
+     * Debug builds request test ads on the PRODUCTION unit so the SSV
+     * callback to our server can be tested end to end (Google's sample
+     * unit never calls our server). Test ads never earn or bill, but ONLY
+     * on registered test devices: register the phone in the AdMob console
+     * (Settings > Test devices) or add its hashed id below — the SDK logs
+     * it to logcat on the first ad request — before running a debug build.
      */
-    private fun rewardedInterstitialId(): String =
-        if (BuildConfig.DEBUG) SAMPLE_REWARDED_INTERSTITIAL_ID
-        else PROD_REWARDED_INTERSTITIAL_ID
+    private const val REWARDED_INTERSTITIAL_ID = PROD_REWARDED_INTERSTITIAL_ID
+
+    private val DEBUG_TEST_DEVICE_IDS: List<String> = listOf(
+        // "33BE2250B43518CCDA7DE426D04EE231",
+    )
 
     private val TIER_1_MARKET_CODES = setOf(
         "US", "CA", "GB", "AU", "NZ", "DE", "FR", "JP", "CH", "NL", "SE", "NO", "DK", "AT", "IE"
@@ -71,6 +75,13 @@ object AdManager {
      */
     fun initialize(context: Context) {
         if (isInitialized) return
+        if (BuildConfig.DEBUG) {
+            MobileAds.setRequestConfiguration(
+                RequestConfiguration.Builder()
+                    .setTestDeviceIds(DEBUG_TEST_DEVICE_IDS)
+                    .build()
+            )
+        }
         MobileAds.initialize(context) { status ->
             Log.d(TAG, "AdMob MobileAds initialized: $status")
             isInitialized = true
@@ -89,7 +100,7 @@ object AdManager {
 
         RewardedInterstitialAd.load(
             context,
-            rewardedInterstitialId(),
+            REWARDED_INTERSTITIAL_ID,
             adRequest,
             object : RewardedInterstitialAdLoadCallback() {
                 override fun onAdLoaded(ad: RewardedInterstitialAd) {
@@ -109,17 +120,29 @@ object AdManager {
 
     /**
      * Displays the Rewarded Interstitial ad.
-     * Guarantees scan execution or reward credit occurs strictly on user reward or as fallback if ad display fails.
+     *
+     * Before showing, the ad is tagged with the Firebase uid and a fresh
+     * single-use ticket. On reward, Google calls our admobSsv endpoint with
+     * both, signed; the scan request then presents the same ticket. The
+     * ticket reaches onRewardEarned only after the reward callback fired.
      */
     fun showRewardedGate(
         activity: Activity,
-        onRewardEarned: () -> Unit,
+        userId: String,
+        onRewardEarned: (adTicket: String) -> Unit,
         onAdUnavailable: () -> Unit,
         onAdDismissedEarly: () -> Unit = onAdUnavailable
     ) {
         val currentAd = rewardedInterstitialAd
         if (currentAd != null) {
             var rewardGranted = false
+            val adTicket = java.util.UUID.randomUUID().toString()
+            currentAd.setServerSideVerificationOptions(
+                ServerSideVerificationOptions.Builder()
+                    .setUserId(userId)
+                    .setCustomData(adTicket)
+                    .build()
+            )
 
             currentAd.fullScreenContentCallback = object : FullScreenContentCallback() {
                 override fun onAdDismissedFullScreenContent() {
@@ -127,7 +150,7 @@ object AdManager {
                     rewardedInterstitialAd = null
                     loadRewardedInterstitial(activity.applicationContext)
                     if (rewardGranted) {
-                        onRewardEarned()
+                        onRewardEarned(adTicket)
                     } else {
                         onAdDismissedEarly()
                     }

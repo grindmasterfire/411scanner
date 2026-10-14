@@ -30,15 +30,20 @@ const CODES = {
   "20102": "The scanner is busy right now. Try again shortly.",
   "20201": "The scanner hit an unexpected problem on our end. We've logged it \u2014 try again.",
   "20301": "The investigation took too long and timed out. Try again.",
-  "30101": "Our research AI declined this target. Not everything can be investigated.",
+  // 30101-30103 split by grounding cause (approved 2026-10-14).
+  "30101": "Our research AI skipped its live web search on this one \u2014 that's on our end.",
+  "30102": "We searched the live web but couldn't find anything solid on this target.",
+  "30103": "The investigation couldn't be verified against live sources.",
   "30201": "Our safety systems blocked this investigation.",
   "40101": "You're out of scans on this plan. Top up or upgrade to keep going.",
+  "40102": "Your family admin has paused scanning for your account.",
   "40201": "Deep dives need a top-up credit. Pick up a top-up pack to unlock this.",
   "40301": "We couldn't verify that purchase. If you were charged, contact support.",
   "50101": "That doesn't look like a link we can scan. Check it and try again.",
+  "50102": "We couldn't identify what this solicitation is for, so there was nothing to investigate. This attempt was counted against your quota.",
   "50201": "That image is too large to scan. Try a smaller one.",
   "60101": "You've used this week's free scan. Come back next week, or pick a plan.",
-  "60102": "The ad didn't finish playing. Watch it all the way through for your free scan.",
+  "60102": "The ad didn't finish playing. Watch it all the way through to run your scan.",
   "70101": "The deep dive ran into a problem. Try again.",
   "80101": "Your sign-in expired. Sign in again to continue.",
   "90101": "Something unexpected happened. We've logged it \u2014 try again.",
@@ -78,8 +83,11 @@ function causeToCode5(cause) {
     case "overloaded": return "20102";
     case "engine_crash": return "20201";
     case "timeout": return "20301";
-    case "model_refused":
-    case "grounding_rejected": return "30101";
+    // Grounding failures, by what actually happened (geminiEngine sets
+    // groundingCause): no search ran / search found nothing / other.
+    case "model_refused": return "30101";
+    case "blink": return "30102";
+    case "grounding_rejected": return "30103";
     case "safety_block": return "30201";
     case "out_of_scans": return "40101";
     case "deep_dive_no_credit": return "40201";
@@ -94,8 +102,16 @@ function causeToCode5(cause) {
   }
 }
 
+/* A grounding rejection's cause -> its 3010x code. Unknown causes are 30103. */
+function groundingCode5(groundingCause) {
+  if (groundingCause === "model_refused") return "30101";
+  if (groundingCause === "blink") return "30102";
+  return "30103";
+}
+
 module.exports = {
   CODES,
+  groundingCode5,
   FALLBACK_CODE,
   messageFor,
   httpStatusToCode5,

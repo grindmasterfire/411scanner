@@ -6,4 +6,8 @@
          The quota DataStore (411_scan_quota) stays backed up so the
          free weekly tier cannot be farmed by reinstalling. -->
     <exclude domain="sharedpref" path="fouroneone_scan_history.xml"/>
+    <!-- An in-flight scan belongs to this install. Restoring it after a
+         reinstall resurrected a dead scan on every launch (board 6.8). -->
+    <exclude domain="sharedpref" path="scan_job_prefs.xml"/>
+    <exclude domain="sharedpref" path="pending_scan_prefs.xml"/>
 </full-backup-content>

@@ -39,7 +39,19 @@ data class ConsumerCard(
     val verdictLabel: String = "MOSTLY EVERYBODY",
     val tagline: String = "",
     val essential411: String = "",
-    val secondaryTargetsNote: String = ""
+    val secondaryTargetsNote: String = "",
+    /** Set when a required-infrastructure exception capped the meter. */
+    val infrastructureException: InfrastructureException? = null
+)
+
+/**
+ * Server-applied required-infrastructure exception (ruling 2026-10-14):
+ * the findings stand in full; only the action changed. The app never
+ * reads the evidence-based score: every score decision (meter, report
+ * button, tray) uses the final action_meter_score.
+ */
+data class InfrastructureException(
+    val entity: String
 )
 
 data class SolicitationIdentity(

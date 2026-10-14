@@ -29,6 +29,10 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -65,6 +69,8 @@ fun ScannerSurface(
     loadedBitmap: Bitmap?,
     isConverting: Boolean,
     isLoading: Boolean,
+    /** Scans running in the background (not locking the controls). */
+    backgroundNote: String? = null,
     scanError: String?,
     hasSelectedImage: Boolean,
     hasValidBase64: Boolean,
@@ -171,8 +177,45 @@ fun ScannerSurface(
 
                 Spacer(
                     modifier =
+                        Modifier.height(8.dp)
+                )
+
+                // The promise, not a countdown: the scan runs in the
+                // background and the notification is the pickup slip.
+                Text(
+                    text = ScanNotifications.WAITING_TEXT,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(
+                    modifier =
                         Modifier.height(16.dp)
                 )
+            }
+
+            /*
+             * Scans in flight that do not lock the controls: Professional's
+             * parallel scans, or a one-slot scan past its live window.
+             * Informational only.
+             */
+            if (backgroundNote != null && !isLoading) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = backgroundNote,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
             }
 
             /*

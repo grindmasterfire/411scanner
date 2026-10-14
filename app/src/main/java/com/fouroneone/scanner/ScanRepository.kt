@@ -21,7 +21,6 @@
 
 package com.fouroneone.scanner
 
-import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -53,83 +52,71 @@ object ScanRepository {
 
     /**
      * Sends the prepared JPEG plus optional OCR text to the production
-     * scan endpoint.
+     * scan endpoint, exactly once, under the caller's request ID.
      *
      * OCR may be empty. The server treats it only as a cheap candidate
      * discovery clue and safely falls back to normal grounded analysis
      * whenever the clue is absent or insufficient.
-     */
-    suspend fun scan(
-        base64Image: String,
-        ocrText: String = "",
-        context: Context? = null
-    ): String = withContext(Dispatchers.IO) {
-        // Generate a client requestId for resumable scans. If the HTTP
-        // request is interrupted (navigated away, connection dropped),
-        // we poll getScanResult until the server finishes.
-        val clientRequestId = java.util.UUID.randomUUID().toString()
-
-        // Persist before the network call so even an immediate
-        // interruption is recoverable. Cleared on delivery.
-        context?.let { PendingScanManager.savePending(it, clientRequestId) }
-
-        try {
-            val result = executeScanRequest(base64Image, ocrText, clientRequestId)
-            context?.let { PendingScanManager.clearPending(it) }
-            result
-        } catch (e: ScanFailureException) {
-            throw e
-        } catch (e: IOException) {
-            // Transport failed — the server may still be processing.
-            // Poll for the result instead of losing the scan.
-            Log.w(TAG, "Scan transport failed, polling for result: $clientRequestId")
-            val result = pollForScanResult(clientRequestId)
-            if (result != null) {
-                context?.let { PendingScanManager.clearPending(it) }
-                return@withContext result
-            }
-
-            Log.e(TAG, "Scan transport failure", e)
-            val code5 = ScanErrorCodes.forTransportError(e)
-            throw ScanFailureException(code5, ScanErrorCodes.messageFor(code5))
-        }
-    }
-
-    /**
-     * Resume a scan that was interrupted by navigation away, process
-     * death, or app restart. Returns the result JSON string if the
-     * server finished, null if no pending scan or still processing.
      *
-     * The pending ID is cleared on successful retrieval so a subsequent
-     * launch does not re-poll a completed scan.
+     * Returns null when the outcome is unknown (the transport dropped, or
+     * the infrastructure answered instead of the scan): the server may
+     * still be working, so the caller follows the request ID via
+     * getScanResult. Called only by ScanWorker, never resent for the same
+     * request.
      */
-    suspend fun resumePendingScan(
-        context: Context,
-        maxWaitMs: Long = 120_000, // 2 minutes — server already had a head start
-        intervalMs: Long = 5_000
+    suspend fun submitScan(
+        requestId: String,
+        base64Image: String,
+        ocrText: String,
+        adProof: AdProof
     ): String? = withContext(Dispatchers.IO) {
-        val requestId = PendingScanManager.getPending(context)
-            ?: return@withContext null
-
-        Log.d(TAG, "Resuming pending scan: $requestId")
-        val result = pollForScanResult(requestId, maxWaitMs, intervalMs)
-        if (result != null) {
-            PendingScanManager.clearPending(context)
+        try {
+            executeScanRequest(base64Image, ocrText, requestId, adProof)
+        } catch (e: ScanFailureException) {
+            if (!e.outcomeUnknown) throw e
+            AppLog.event("transport") { "no server outcome code5=${e.code5}, following" }
+            null
+        } catch (e: IOException) {
+            Log.w(TAG, "Scan transport failed, following result: $requestId", e)
+            // The message says why (reset, timeout, network switch).
+            AppLog.event("transport") {
+                "failed ${e.javaClass.simpleName}: ${AppLog.scrub(e.message.orEmpty())}, following"
+            }
+            null
         }
-        result
+    }
+
+    /** What following a request ID found. */
+    sealed class FollowStatus {
+        data class Ready(val rawJson: String) : FollowStatus()
+
+        /** The server has the request and is still working on it. */
+        object Received : FollowStatus()
+
+        /** The server never got the request: it is safe to resend. */
+        object NotReceived : FollowStatus()
+
+        /** No answer either way (offline, or a server without the flag). */
+        object Unknown : FollowStatus()
     }
 
     /**
-     * Poll getScanResult until the server finishes or timeout.
-     * Returns the result JSON string, or null on timeout.
+     * Poll getScanResult until the server finishes or [deadlineMs] passes.
+     * Always checks at least once, so a scan that finished while the app
+     * was dead is delivered even when its scan window has long closed.
+     * Stops early with NotReceived once [resendAtMs] has passed and the
+     * server says it never got the request. Throws ScanFailureException
+     * when the server recorded the attempt as failed (e.g. 30101) — the
+     * outcome is final, so polling stops.
      */
-    private suspend fun pollForScanResult(
+    suspend fun awaitScanResult(
         requestId: String,
-        maxWaitMs: Long = 300_000, // 5 minutes
-        intervalMs: Long = 5_000   // 5 seconds
-    ): String? = withContext(Dispatchers.IO) {
-        val start = System.currentTimeMillis()
-        while (System.currentTimeMillis() - start < maxWaitMs) {
+        deadlineMs: Long,
+        resendAtMs: Long = Long.MAX_VALUE,
+        intervalMs: Long = 5_000
+    ): FollowStatus = withContext(Dispatchers.IO) {
+        var last: FollowStatus = FollowStatus.Unknown
+        do {
             try {
                 val idToken = AuthManager.currentIdToken()
                 val payload = JSONObject().apply {
@@ -148,24 +135,52 @@ object ScanRepository {
                 }
                 val request = reqBuilder.build()
 
+                AppLog.event("request") { "sent path=${request.url.encodedPath}" }
                 val response = httpClient.newCall(request).execute()
                 val body = response.body?.string()
                 response.close()
 
                 if (response.isSuccessful && !body.isNullOrEmpty()) {
                     val result = JSONObject(body).optJSONObject("result")
-                    if (result != null && result.optBoolean("ready")) {
-                        val scanResult = result.optJSONObject("result")
-                        // Return the full scan result JSON for parsing
-                        return@withContext scanResult?.toString()
+                    last = when {
+                        result == null -> FollowStatus.Unknown
+                        !result.has("received") -> FollowStatus.Unknown
+                        result.optBoolean("received") -> FollowStatus.Received
+                        else -> FollowStatus.NotReceived
                     }
+                    AppLog.event("response") {
+                        "http=${response.code} path=${request.url.encodedPath} status=${last.javaClass.simpleName}"
+                    }
+                    if (result != null && result.optBoolean("ready")) {
+                        if (result.optBoolean("failed")) {
+                            val code5 = result.optString("code5")
+                                .ifBlank { ScanErrorCodes.FALLBACK_CODE }
+                            val message = result.optString("message")
+                                .ifBlank { ScanErrorCodes.messageFor(code5) }
+                            AppLog.event("reject") { "code5=$code5 cause=recovered_failure" }
+                            throw ScanFailureException(code5, message)
+                        }
+                        // Return the full scan result JSON for parsing
+                        result.optJSONObject("result")?.let {
+                            return@withContext FollowStatus.Ready(it.toString())
+                        }
+                    }
+                } else {
+                    AppLog.event("response") { "http=${response.code} path=${request.url.encodedPath}" }
                 }
+            } catch (e: ScanFailureException) {
+                throw e
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.w(TAG, "Poll failed, retrying: ${e.message}")
+                AppLog.event("poll") { "failed ${e.javaClass.simpleName}: ${AppLog.scrub(e.message.orEmpty())}, retrying" }
             }
+            if (last == FollowStatus.NotReceived && System.currentTimeMillis() >= resendAtMs) break
+            if (System.currentTimeMillis() + intervalMs > deadlineMs) break
             kotlinx.coroutines.delay(intervalMs)
-        }
-        null
+        } while (true)
+        last
     }
 
     /**
@@ -175,7 +190,8 @@ object ScanRepository {
     private suspend fun executeScanRequest(
         base64Image: String,
         ocrText: String,
-        clientRequestId: String
+        clientRequestId: String,
+        adProof: AdProof
     ): String {
         val payload = JSONObject().apply {
             put("data", JSONObject().apply {
@@ -191,6 +207,13 @@ object ScanRepository {
 
                 // Client-generated ID for resumable scans.
                 put("clientRequestId", clientRequestId)
+
+                // Ad-gate proof; the server verifies the ticket via SSV.
+                when (adProof) {
+                    is AdProof.Ticket -> put("adTicket", adProof.adTicket)
+                    AdProof.NoFill -> put("adNoFill", true)
+                    AdProof.None -> Unit
+                }
             })
         }
 
@@ -207,8 +230,10 @@ object ScanRepository {
         if (idToken != null) builder.header("Authorization", "Bearer $idToken")
         val request = builder.build()
 
+        AppLog.event("request") { "sent path=${request.url.encodedPath}" }
         val response =
             httpClient.newCall(request).execute()
+        AppLog.event("response") { "http=${response.code} path=${request.url.encodedPath}" }
 
         val responseBodyString =
             response.body?.string()
@@ -225,8 +250,10 @@ object ScanRepository {
                 "Scan HTTP error (${response.code}): $responseBodyString"
             )
 
-            val code5 = ScanErrorCodes.forHttpStatus(response.code)
-            throw ScanFailureException(code5, ScanErrorCodes.messageFor(code5))
+            val failure =
+                ScanErrorCodes.fromCallableError(response.code, responseBodyString)
+            AppLog.event("reject") { "code5=${failure.code5} cause=http ${response.code}" }
+            throw failure
         }
 
         return responseBodyString
@@ -313,8 +340,10 @@ object ScanRepository {
             if (idToken != null) reqBuilder.header("Authorization", "Bearer $idToken")
             val request = reqBuilder.build()
 
+            AppLog.event("request") { "sent path=${request.url.encodedPath}" }
             val response =
                 httpClient.newCall(request).execute()
+            AppLog.event("response") { "http=${response.code} path=${request.url.encodedPath}" }
 
             val body = response.body?.string()
 
@@ -323,10 +352,21 @@ object ScanRepository {
                     TAG,
                     "Deep dive HTTP error (${response.code}): $body"
                 )
-                return@withContext null
+                // Surface the server's reason (e.g. 40201 no top-up credit)
+                // instead of silently returning nothing.
+                throw ScanErrorCodes.fromCallableError(response.code, body)
             }
 
             val json = JSONObject(body)
+
+            AppLog.event("parse") {
+                val envelope = when {
+                    json.has("result") -> "result.deepDive"
+                    json.has("text") -> "text"
+                    else -> "raw"
+                }
+                "deep_dive success parser=ScanRepository.deepDive envelope=$envelope"
+            }
 
             when {
                 json.has("result") -> {
@@ -340,11 +380,16 @@ object ScanRepository {
                 else ->
                     body
             }
+        } catch (e: ScanFailureException) {
+            throw e
         } catch (e: Exception) {
             Log.e(
                 TAG,
                 "Deep dive failed: ${e.message}"
             )
+            AppLog.event(if (e is org.json.JSONException) "parse" else "deep_dive") {
+                "deep_dive failure at=${AppLog.failingParser(e)} error=${e.javaClass.simpleName}"
+            }
             null
         }
     }

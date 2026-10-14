@@ -397,7 +397,7 @@ fun TechnicalLedgerTab(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             if (
-                score >= 8.0
+                showsReportButton(score)
             ) {
                 // Smart report routing: pick the best authority based on what was scanned
                 val badges = consumerCard?.classificationBadges ?: emptyList()
@@ -559,3 +559,12 @@ private fun LedgerItem(
         )
     }
 }
+
+/**
+ * Unified action ladder: reporting starts at 8.5 (8.5-8.9 delete and
+ * report, 9 report to platform, 10 delete from earth); 8.0-8.4 is delete
+ * from device with no report. Pass the FINAL displayed score: a
+ * required-infrastructure 7.9 never shows the button, whatever the
+ * evidence scored.
+ */
+internal fun showsReportButton(finalScore: Double): Boolean = finalScore >= 8.5

@@ -151,9 +151,9 @@ check("deep dive summary", () => {
 });
 
 console.log("== failure taxonomy ==");
-check("all 18 codes resolve to messages", () => {
+check("all 20 codes resolve to messages", () => {
   const codes = ["10101","10102","20101","20102","20201","20301",
-    "30101","30201","40101","40201","40301","50101","50201",
+    "30101","30102","30103","30201","40101","40201","40301","50101","50201",
     "60101","60102","70101","80101","90101"];
   for (const c of codes) {
     const m = messageFor(c);
@@ -164,8 +164,15 @@ check("all 18 codes resolve to messages", () => {
 check("60102 is the ad-gate code", () => {
   assert.ok(messageFor("60102").toLowerCase().includes("ad"));
 });
-check("causeToCode5 maps grounding rejections", () => {
-  assert.equal(causeToCode5("grounding_rejected"), "30101");
+check("grounding rejections split by cause", () => {
+  assert.equal(causeToCode5("model_refused"), "30101");
+  assert.equal(causeToCode5("blink"), "30102");
+  assert.equal(causeToCode5("grounding_rejected"), "30103");
+  const { groundingCode5 } = require("../scanErrorCodes");
+  assert.equal(groundingCode5("model_refused"), "30101");
+  assert.equal(groundingCode5("blink"), "30102");
+  assert.equal(groundingCode5("unknown"), "30103");
+  assert.equal(groundingCode5(undefined), "30103");
 });
 
 console.log("== receipt builder: tier ==");

@@ -24,12 +24,20 @@ object ScanHistoryManager {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
-    fun saveScan(context: Context, rawJson: String) {
+    /*
+     * Synchronized: Professional's parallel scans can land at once, and an
+     * unguarded read-modify-write would drop one of them from the tray.
+     * The scan's request ID is the item ID, so two reports landing in the
+     * same millisecond never share one, and a notification tap finds its
+     * report here after the screen has acknowledged it.
+     */
+    @Synchronized
+    fun saveScan(context: Context, rawJson: String, requestId: String? = null) {
         val report = ScanReport.fromJson(rawJson) ?: return
         val currentHistory = getRecentScans(context).toMutableList()
 
         val newItem = ScanHistoryItem(
-            id = System.currentTimeMillis().toString(),
+            id = requestId ?: System.currentTimeMillis().toString(),
             targetName = report.consumerCard.targetName,
             developerOrEntity = report.consumerCard.developerOrEntity,
             score = report.consumerCard.actionMeterScore,

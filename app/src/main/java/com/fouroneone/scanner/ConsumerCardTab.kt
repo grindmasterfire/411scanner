@@ -81,6 +81,7 @@ fun ConsumerCardTab(
     var isExpanded by remember { mutableStateOf(false) }
     var deepDiveText by remember { mutableStateOf<String?>(null) }
     var isLoadingDeepDive by remember { mutableStateOf(false) }
+    var deepDiveError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     Column(
@@ -138,6 +139,23 @@ fun ConsumerCardTab(
             score = consumerCard.actionMeterScore,
             verdictLabel = consumerCard.verdictLabel
         )
+
+        // Required infrastructure: the meter carries an exception label only.
+        // Why an entity is on the list is explained in the user manual
+        // (owner ruling 2026-10-14), not in the report.
+        consumerCard.infrastructureException?.let {
+            Text(
+                text = infrastructureExceptionText(
+                    consumerCard.actionMeterScore,
+                    consumerCard.verdictLabel
+                ),
+                fontSize = 12.sp,
+                color = Color(0xFF49454F),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 6.dp)
+            )
+        }
 
         SixVectorGrid(
             metrics = consumerCard.metrics,
@@ -220,13 +238,20 @@ fun ConsumerCardTab(
                                 onRequestDeepDive != null
                             ) {
                                 isLoadingDeepDive = true
+                                deepDiveError = null
 
                                 scope.launch {
-                                    deepDiveText =
-                                        onRequestDeepDive()
-
-                                    isLoadingDeepDive = false
-                                    isExpanded = true
+                                    try {
+                                        deepDiveText =
+                                            onRequestDeepDive()
+                                        isExpanded = true
+                                    } catch (e: ScanFailureException) {
+                                        // e.g. 40201: no top-up credit.
+                                        deepDiveError =
+                                            "${e.message}\nReference code: ${e.code5}"
+                                    } finally {
+                                        isLoadingDeepDive = false
+                                    }
                                 }
                             } else {
                                 isExpanded = true
@@ -290,6 +315,16 @@ fun ConsumerCardTab(
                     }
                 }
 
+                deepDiveError?.let { err ->
+                    Text(
+                        text = err,
+                        modifier = Modifier.padding(top = 8.dp),
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        color = Color(0xFFB3261E)
+                    )
+                }
+
                 AnimatedVisibility(
                     visible =
                         isExpanded &&
@@ -327,3 +362,7 @@ fun ConsumerCardTab(
         Spacer(modifier = Modifier.height(16.dp))
     }
 }
+
+/** "7.9 for professional consideration only, with an exception." */
+internal fun infrastructureExceptionText(score: Double, verdictLabel: String): String =
+    "$score for ${verdictLabel.lowercase()}, with an exception."

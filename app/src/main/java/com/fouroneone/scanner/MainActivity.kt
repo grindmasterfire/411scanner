@@ -12,7 +12,8 @@
  *
  * @security_gate:
  * Lifecycle/bootstrap only. This activity does not execute scans, consume
- * quota, call Gemini, calculate scores, or mutate diagnostic reports.
+ * quota, call Gemini, calculate scores, or mutate diagnostic reports. It
+ * only re-attaches the background scan worker on launch.
  *
  * @owner_context:
  * 411 Scanner production Android entry point.
@@ -73,10 +74,19 @@ class MainActivity : ComponentActivity() {
 
         incomingImageUriState =
             IntentHandler.extractImageUri(intent)
+        forwardTappedScan(intent)
 
         AuthManager.init(applicationContext)
         AdManager.initialize(applicationContext)
         BillingManager.initialize(applicationContext)
+
+        /*
+         * A scan the system or a force-stop killed is picked up again
+         * here; one that finished while the app was dead is already in
+         * ScanJobStore and the scanner screen shows it.
+         */
+        ScanNotifications.ensureChannels(applicationContext)
+        ScanJobScheduler.recoverOnAppOpen(applicationContext)
 
         setContent {
             MaterialTheme {
@@ -107,6 +117,14 @@ class MainActivity : ComponentActivity() {
 
         if (extractedUri != null) {
             incomingImageUriState = extractedUri
+        }
+        forwardTappedScan(intent)
+    }
+
+    /** A scan notification was tapped: the scanner opens that report. */
+    private fun forwardTappedScan(intent: Intent?) {
+        intent?.getStringExtra(ScanNotifications.EXTRA_REQUEST_ID)?.let {
+            ScanNotifications.openRequests.value = it
         }
     }
 }

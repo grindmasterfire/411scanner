@@ -55,7 +55,8 @@ object ScanReportParser {
                         root
                     )
             )
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            AppLog.event("parse") { "failure parser=${AppLog.failingParser(e)} error=${e.javaClass.simpleName}" }
             null
         }
     }

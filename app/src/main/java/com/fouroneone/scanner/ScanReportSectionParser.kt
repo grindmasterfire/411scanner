@@ -67,8 +67,16 @@ object ScanReportSectionParser {
             ),
             tagline = card.optString("tagline", ""),
             essential411 = card.optString("essential_411", ""),
-            secondaryTargetsNote = card.optString("secondary_targets_note", "")
+            secondaryTargetsNote = card.optString("secondary_targets_note", ""),
+            infrastructureException = parseInfrastructureException(card)
         )
+    }
+
+    /** Only a confirmed exception that actually changed the meter is shown. */
+    fun parseInfrastructureException(card: JSONObject): InfrastructureException? {
+        val block = card.optJSONObject("required_infrastructure") ?: return null
+        if (block.optString("status") != "confirmed" || !block.optBoolean("applied")) return null
+        return InfrastructureException(entity = block.optString("entity"))
     }
 
     fun parseSolicitationIdentity(report: JSONObject): SolicitationIdentity {

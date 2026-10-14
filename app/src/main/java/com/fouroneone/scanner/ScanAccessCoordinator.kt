@@ -4,8 +4,8 @@
  * @cap: 150 Lines
  * @responsibility:
  * Resolve whether a user may begin a scan and route the request through the
- * free-tier rewarded-ad gate. Subscribers and the tester account are never
- * ad-gated.
+ * rewarded-ad gate. Only the tester account and the Professional tier skip
+ * the ad.
  *
  * @dependencies:
  * Android Activity/Context, QuotaManager, QuotaStatus, AdManager.
@@ -19,22 +19,34 @@
  * 411 Scanner production Android access and monetization gate.
  *
  * @critical_rule:
- * Ad revenue subsidizes the free weekly scan and adds to variable profit.
- * Everyone sees a rewarded ad before EVERY scan, except the tester account
- * and the future Professional tier (V1). Free tier: the ad must COMPLETE —
- * no completed ad, no scan. Subscribers: the ad is bonus revenue, not the
- * price of the scan — the scan proceeds once the ad completes or is
- * dismissed, and an unavailable ad never blocks a paying customer.
+ * Ad revenue offsets API cost and funds the future budget. Everyone watches a
+ * rewarded ad to completion before EVERY scan, except the tester account and
+ * the Professional tier. The proof is server-verified: the ad
+ * carries a single-use ticket that Google reports to admobSsv on reward, and
+ * the scan request presents that ticket (functions/adGate.js). Subscribers
+ * only: when AdMob has no ad to show (no fill), the scan proceeds flagged
+ * adNoFill so a paying customer is never blocked by ad supply.
  *
- * Authorization and consumption are separate operations. This component may
- * authorize a scan, but only ScanExecutionWorkflow consumes quota after a
- * valid report has been delivered.
+ * The server owns quota: it counts the free weekly scan and the subscription
+ * bucket at its gate. This component only decides what to ask for.
  */
 
 package com.fouroneone.scanner
 
 import android.app.Activity
 import android.content.Context
+
+/** What the scan request carries as proof of the ad gate. */
+sealed class AdProof {
+    /** Tester / Professional: no ad. */
+    object None : AdProof()
+
+    /** Ad watched to the reward; the server matches this ticket via SSV. */
+    data class Ticket(val adTicket: String) : AdProof()
+
+    /** Subscriber only: AdMob had no ad to show. Logged server-side. */
+    object NoFill : AdProof()
+}
 
 /**
  * Centralizes the access decision that occurs before scan execution.
@@ -50,65 +62,57 @@ object ScanAccessCoordinator {
      * The callbacks intentionally leave navigation and scan execution with
      * the caller while keeping entitlement rules centralized here.
      *
-     * @param onGateFailed invoked with a 5-digit failure code when the free
-     * tier's ad gate does not complete. The scan must not execute.
+     * @param onGateFailed invoked with a 5-digit failure code when the ad
+     * gate does not complete. The scan must not execute.
      */
     suspend fun requestAuthorization(
         context: Context,
         quotaStatus: QuotaStatus,
-        onAuthorized: () -> Unit,
+        onAuthorized: (AdProof) -> Unit,
         onPaywallRequired: () -> Unit,
         onGateFailed: (code5: String) -> Unit
     ) {
-        /*
-         * DataStore is checked directly before authorization so an older
-         * Compose snapshot cannot grant a scan after entitlement is gone.
-         */
-        val canPerformScan =
-            QuotaManager.canPerformScan(context)
+        // Tester and Professional: never shown an ad. The server skips the
+        // gate for both on its own entitlement read.
+        if (quotaStatus.isTesterUnlimited || quotaStatus.serverQuota?.isProfessional == true) {
+            onAuthorized(AdProof.None)
+            return
+        }
 
-        if (!canPerformScan) {
+        /*
+         * Server quota is re-read right before authorization so a stale
+         * Compose snapshot cannot send someone through an ad they can't
+         * use. The server re-checks at its gate either way.
+         */
+        if (!QuotaManager.canPerformScan(context)) {
             onPaywallRequired()
             return
         }
 
-        val activity =
-            context as? Activity
-
-        // Tester account: never gated. (Professional tier (V1) will bypass
-        // here too once the product exists.)
-        if (quotaStatus.isTesterUnlimited) {
-            onAuthorized()
+        // The ad must be tied to a real Firebase uid (anonymous is fine);
+        // the local guest fallback has none, so its ad could never verify.
+        val user = AuthManager.userState.value
+        if (!user.isAuthenticated || user.uid.isBlank()) {
+            onGateFailed("80101")
             return
         }
 
-        /*
-         * Everyone else sees a rewarded ad before EVERY scan.
-         *
-         * Free tier: strict — the ad must complete. Dismissed early,
-         * unavailable, or no Activity: the scan does not execute (60102).
-         *
-         * Subscribers: the ad is variable-profit revenue, not the price of
-         * the scan. The scan proceeds after the ad completes or is
-         * dismissed; an unavailable ad never blocks a paying customer.
-         */
-        if (activity != null) {
-            if (quotaStatus.isUnlimited) {
-                AdManager.showRewardedGate(
-                    activity = activity,
-                    onRewardEarned = { onAuthorized() },
-                    onAdUnavailable = { onAuthorized() },
-                    onAdDismissedEarly = { onAuthorized() }
-                )
-            } else {
-                AdManager.showRewardedGate(
-                    activity = activity,
-                    onRewardEarned = { onAuthorized() },
-                    onAdUnavailable = { onGateFailed("60102") }
-                )
-            }
-        } else {
-            if (quotaStatus.isUnlimited) onAuthorized() else onGateFailed("60102")
+        val activity = context as? Activity
+        val subscriber = quotaStatus.isSubscriber
+        if (activity == null) {
+            if (subscriber) onAuthorized(AdProof.NoFill) else onGateFailed("60102")
+            return
         }
+
+        AdManager.showRewardedGate(
+            activity = activity,
+            userId = user.uid,
+            onRewardEarned = { adTicket -> onAuthorized(AdProof.Ticket(adTicket)) },
+            onAdUnavailable = {
+                if (subscriber) onAuthorized(AdProof.NoFill) else onGateFailed("60102")
+            },
+            // Everyone, subscribers included, must finish the ad.
+            onAdDismissedEarly = { onGateFailed("60102") }
+        )
     }
 }

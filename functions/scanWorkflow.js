@@ -20,6 +20,11 @@
  */
 
 const { HttpsError } = require("firebase-functions/v2/https");
+const { Timestamp } = require("firebase-admin/firestore");
+
+const { messageFor, httpStatusToCode5, groundingCode5 } = require("./scanErrorCodes");
+
+const SCAN_RESULT_TTL_MS = 24 * 60 * 60 * 1000;
 const { buildCacheKey } = require("./cacheKey");
 
 const {
@@ -65,6 +70,18 @@ const {
   checkEntitlement,
   consumeScan,
 } = require("./entitlementStore");
+const { enforceAdGate, releaseAdGate } = require("./adGate");
+const { recordScanEvent, researchQuality } = require("./scanDeliveryEvents");
+const { applyRequiredInfrastructure } = require("./requiredInfrastructure");
+const { getVerdict } = require("./actionMeter");
+
+/*
+ * Ad-gate rollout switch. Off (default): gate rejections are logged as
+ * observe_would_reject_* and the scan proceeds, so the current app (which
+ * sends no adTicket) keeps working. Turn on (AD_GATE_ENFORCED=true on the
+ * scan service) only after the SSV-capable app build is live.
+ */
+const AD_GATE_ENFORCED = process.env.AD_GATE_ENFORCED === "true";
 
 // App-store listing hosts: valid scan targets, but never probe targets.
 const PLATFORM_LISTING_HOSTS = [
@@ -112,8 +129,13 @@ async function executeScan(
   db,
   serverTimestamp,
   data = {},
-  uid = null
+  uid = null,
+  caller = {}
 ) {
+  // Tester account (verified email, resolved in index.js): never charged,
+  // never blocked, never ad-gated.
+  const isTester = caller.isTester === true;
+
   // Loop A: identity is now available to the pipeline. Logged for
   // verification; server-side entitlement (Loop B) will consume it.
   console.log(`[scan] caller uid: ${uid || "anonymous"}`);
@@ -129,7 +151,53 @@ async function executeScan(
    */
   const requestId = data.clientRequestId || createScanRequestId();
 
-  const __result = await (async () => {
+  /*
+   * Idempotency: a client request ID is claimed before the gate charges
+   * anything, so a resend never runs or charges twice. A resend of a
+   * request we already have gets its stored outcome, or "in progress".
+   * This is what lets the app resend after a connection drop.
+   */
+  const startMs = Date.now();
+  if (data.clientRequestId) {
+    const existing = await claimScanRequest(db, serverTimestamp, requestId, uid);
+    if (existing) {
+      const state = settledScanOutcome(existing).state;
+      await recordScanEvent(db, "replayed", { requestId, uid: uid || null, state });
+      if (existing.pending && state === "failed") {
+        await recordScanEvent(db, "stale_claim", { requestId, uid: uid || null });
+      }
+      return replayScanRequest(existing, uid);
+    }
+    await recordScanEvent(db, "received", { requestId, uid: uid || null });
+  }
+
+  /*
+   * Business Center facts about this attempt, filled in as the pipeline
+   * runs and recorded once with its outcome (scanDeliveryEvents).
+   */
+  const scanFacts = {
+    tier: isTester ? "tester" : null,
+    charged: false,
+    chargedVia: null,
+    quality: null,
+    infrastructure: null,
+  };
+  const recordCompletion = (outcome) =>
+    recordScanEvent(db, "completed", {
+      requestId,
+      uid: uid || null,
+      tier: scanFacts.tier,
+      charged: scanFacts.charged,
+      chargedVia: scanFacts.chargedVia,
+      durationMs: Date.now() - startMs,
+      quality: scanFacts.quality,
+      infrastructure: scanFacts.infrastructure,
+      ...outcome,
+    });
+
+  let __result;
+  try {
+  __result = await (async () => {
   const imageBase64 = data.imageBase64;
   const mimeType = data.mimeType || "image/jpeg";
   const ocrText = data.ocrText || "";
@@ -142,17 +210,21 @@ async function executeScan(
     );
   }
 
-  const entitlement = await checkEntitlement(db, uid);
+  const entitlement = isTester
+    ? { allowed: true, tier: "tester" }
+    : await checkEntitlement(db, uid);
   if (!entitlement.allowed) {
     if (entitlement.reason === "restricted") {
       throw new HttpsError(
         "permission-denied",
-        "Your family admin has restricted scanning for your account."
+        "Your family admin has restricted scanning for your account.",
+        { code5: "40102" }
       );
     }
     throw new HttpsError(
       "resource-exhausted",
-      "You've used all your scans for this billing period."
+      "You've used all your scans for this billing period.",
+      { code5: "40101" }
     );
   }
 
@@ -162,10 +234,48 @@ async function executeScan(
    * for free. Transaction contention is transient: retry the deduction with
    * backoff. If the deduction still fails (race lost, restriction, or a
    * persistent ledger error), fail closed: nothing has been spent yet, and
-   * an uncounted scan is free compute. Only "free" (no bucket) and
-   * "no_uid" proceed, since those callers have no ledger to deduct from.
+   * an uncounted scan is free compute. Only "free" (no bucket; its weekly
+   * scan was spent at the ad gate), the tester, and "no_uid" proceed
+   * uncounted. With the ad gate enforced, no_uid never gets this far.
    */
-  let consumeResult = await consumeScan(db, uid);
+  /*
+   * Rewarded-ad gate: everyone except the tester and Professional must
+   * present a Google-verified (SSV) ad ticket. Free tier also spends its
+   * one scan per rolling 7 days here. Runs before the quota deduction so a
+   * missing ad never costs a subscriber a scan.
+   */
+  let adGate;
+  try {
+    adGate = await enforceAdGate(db, {
+      uid,
+      isTester,
+      tier: entitlement.tier,
+      adTicket: data.adTicket,
+      adNoFill: data.adNoFill === true,
+    });
+  } catch (gateErr) {
+    // Observe mode (rollout): log what enforcement would reject and let
+    // the scan through until the SSV-capable app build is live.
+    if (AD_GATE_ENFORCED || !(gateErr instanceof HttpsError)) throw gateErr;
+    adGate = { mode: `observe_would_reject_${gateErr.details?.code5}` };
+  }
+  console.log(`[scan] ad gate: ${adGate.mode} | scan ${requestId}`);
+  scanFacts.tier = scanFacts.tier || entitlement.tier || "free";
+  await recordScanEvent(db, "gate", {
+    requestId,
+    uid: uid || null,
+    tier: scanFacts.tier,
+    mode: adGate.mode,
+  });
+  // The free tier's weekly scan is spent at the ad gate.
+  if (adGate.mode === "free_verified") {
+    scanFacts.charged = true;
+    scanFacts.chargedVia = "free_weekly";
+  }
+
+  let consumeResult = isTester
+    ? { consumed: false, reason: "tester" }
+    : await consumeScan(db, uid);
   for (
     let attempt = 0;
     attempt < 3 &&
@@ -176,18 +286,25 @@ async function executeScan(
     await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
     consumeResult = await consumeScan(db, uid);
   }
+  if (consumeResult.consumed && !consumeResult.isTester) {
+    scanFacts.charged = true;
+    scanFacts.chargedVia = consumeResult.via || "subscription";
+  }
   if (
     !consumeResult.consumed &&
     consumeResult.reason !== "free" &&
+    consumeResult.reason !== "tester" &&
     consumeResult.reason !== "no_uid"
   ) {
+    await releaseAdGate(db, adGate);
     console.warn(
       `[scan] ledger consume failed (${consumeResult.reason}); ` +
         `scan ${requestId} rejected.`
     );
     throw new HttpsError(
       "resource-exhausted",
-      "You've used all your scans for this billing period."
+      "You've used all your scans for this billing period.",
+      { code5: "40101" }
     );
   }
 
@@ -411,12 +528,19 @@ async function executeScan(
      */
     const isProviderFailure = isTransientProviderError(error);
 
-    if (isProviderFailure || error?.groundingRejected) {
+    if (error?.groundingRejected) {
+      // Say what actually happened: no search, empty search, or unverified.
+      const code5 = groundingCode5(error.groundingCause);
+      throw new HttpsError("unavailable", messageFor(code5), { code5 });
+    }
+
+    if (isProviderFailure) {
       throw new HttpsError(
         "unavailable",
         "The analysis provider is temporarily " +
         "unavailable. This attempt was counted against your quota. " +
-        "Please try again in a moment."
+        "Please try again in a moment.",
+        { code5: "20102" }
       );
     }
 
@@ -433,6 +557,7 @@ async function executeScan(
   const report = result.report;
 
   const telemetry = result.telemetry;
+  scanFacts.quality = researchQuality(report, telemetry);
 
   // Server-owned infrastructure measurement (governance write).
   applyMeasuredLedger(report, probe);
@@ -482,7 +607,8 @@ async function executeScan(
   if (probeStatus === "bypassed_no_target") {
     throw new HttpsError(
       "failed-precondition",
-      "Scan aborted: no target domain could be identified from the image or analysis. This attempt was counted against your quota."
+      "Scan aborted: no target domain could be identified from the image or analysis. This attempt was counted against your quota.",
+      { code5: "50102" }
     );
   }
 
@@ -583,13 +709,171 @@ async function executeScan(
 
   return scanResult;
   })();
+  } catch (error) {
+    /*
+     * A failed scan is recorded too, so a client that lost the connection
+     * (swiped away, process death) learns the outcome — the attempt was
+     * counted — instead of polling for a report that will never exist.
+     */
+    const failure = scanFailureOutcome(error);
+    await storeScanOutcome(db, serverTimestamp, requestId, uid, {
+      failed: true,
+      ...failure,
+    });
+    await recordCompletion({ ok: false, code5: failure.code5 });
+    throw error;
+  }
+
+  /*
+   * Required-infrastructure exceptions (ruling 2026-10-14): on every
+   * delivered path, cache hits included, so a report cached before an
+   * entry was added still gets it. Findings are untouched.
+   */
+  relabelVerdict(__result);
+  scanFacts.infrastructure = applyRequiredInfrastructure(__result, { getVerdict });
+
+  // Resumable scans: every delivered path, cache hits included.
+  await storeScanOutcome(db, serverTimestamp, requestId, uid, __result);
+  await recordCompletion({ ok: true, code5: null });
 
   return __result;
 }
 
+/**
+ * Resumable scans: if the client's HTTP request drops (backgrounded app,
+ * process death, flaky network), getScanResult(requestId) returns the
+ * stored outcome — the report, or { failed, code5, message }. Expires
+ * after 24h (Firestore TTL on expiresAt) so it never becomes a second
+ * Cache Bank. Best-effort: a store failure never changes the scan outcome.
+ */
+async function storeScanOutcome(db, serverTimestamp, requestId, uid, outcome) {
+  try {
+    await db.collection("scan_results").doc(requestId).set({
+      ...outcome,
+      requestId,
+      uid: uid || null,
+      createdAt: serverTimestamp(),
+      expiresAt: Timestamp.fromMillis(Date.now() + SCAN_RESULT_TTL_MS),
+    });
+  } catch (e) {
+    console.warn(`[scan] result store failed for ${requestId}: ${e.message}`);
+  }
+}
+
+/*
+ * A claim whose scan never wrote an outcome (instance killed at the 300s
+ * timeout, crash before the catch) is dead after this long.
+ */
+const SCAN_CLAIM_STALE_MS = 6 * 60 * 1000;
+
+function isAlreadyExists(error) {
+  return error?.code === 6 ||
+    error?.code === "already-exists" ||
+    error?.code === "ALREADY_EXISTS";
+}
+
+/**
+ * Claim a client request ID. Returns null when claimed (run the scan),
+ * or the existing scan_results document when this request was seen
+ * before. If the claim cannot be written for another reason, the scan
+ * runs unclaimed, as before idempotency existed.
+ */
+async function claimScanRequest(db, serverTimestamp, requestId, uid) {
+  const ref = db.collection("scan_results").doc(requestId);
+  try {
+    await ref.create({
+      pending: true,
+      requestId,
+      uid: uid || null,
+      claimedAtMs: Date.now(),
+      createdAt: serverTimestamp(),
+      expiresAt: Timestamp.fromMillis(Date.now() + SCAN_RESULT_TTL_MS),
+    });
+    return null;
+  } catch (e) {
+    if (!isAlreadyExists(e)) {
+      console.warn(`[scan] request claim failed for ${requestId}: ${e.message}`);
+      return null;
+    }
+  }
+  const snap = await ref.get();
+  return snap.exists ? snap.data() : null;
+}
+
+/**
+ * What a stored scan_results document means right now:
+ * { state: "pending" } | { state: "failed", code5, message } |
+ * { state: "ready", result }. A stale claim is a timed-out scan.
+ */
+function settledScanOutcome(doc, nowMs = Date.now()) {
+  if (doc.pending) {
+    if (nowMs - (Number(doc.claimedAtMs) || 0) < SCAN_CLAIM_STALE_MS) {
+      return { state: "pending" };
+    }
+    return { state: "failed", code5: "20301", message: messageFor("20301") };
+  }
+  if (doc.failed) {
+    return { state: "failed", code5: doc.code5, message: doc.message };
+  }
+  const result = { ...doc };
+  delete result.createdAt;
+  delete result.expiresAt;
+  return { state: "ready", result };
+}
+
+/** Answer a resend from what the first request already did. */
+function replayScanRequest(existing, uid) {
+  if ((existing.uid || null) !== (uid || null)) {
+    throw new HttpsError("already-exists", "This request ID is already in use.");
+  }
+  const outcome = settledScanOutcome(existing);
+  if (outcome.state === "pending") {
+    // The app treats this as "keep following", never as a failure.
+    throw new HttpsError("already-exists", "This scan is already running.", { inProgress: true });
+  }
+  if (outcome.state === "failed") {
+    throw new HttpsError("aborted", outcome.message || messageFor(outcome.code5), { code5: outcome.code5 });
+  }
+  console.log(`[scan] replayed stored outcome for ${existing.requestId}`);
+  return outcome.result;
+}
+
+/*
+ * One action ladder everywhere: a report cached before the ladder changed
+ * carries an old verdict label. Re-derive label and badge from the score
+ * (the score itself is untouched).
+ */
+function relabelVerdict(result) {
+  const card = result?.report?.consumer_card || result?.consumer_card;
+  const score = Number(card?.action_meter_score);
+  if (!card || !Number.isFinite(score)) return;
+  const verdict = getVerdict(score);
+  card.action_verdict_badge = verdict.badge;
+  card.verdict_label = verdict.label;
+}
+
+/** The user-facing code5 + message for a thrown scan error. */
+function scanFailureOutcome(error) {
+  const serverCode5 = error?.details?.code5;
+  if (serverCode5) {
+    return { code5: serverCode5, message: error.message || messageFor(serverCode5) };
+  }
+  const status = error instanceof HttpsError
+    ? error.httpErrorCode?.status
+    : 500;
+  const code5 = httpStatusToCode5(status);
+  return { code5, message: messageFor(code5) };
+}
+
 module.exports = {
   executeScan,
+  settledScanOutcome,
   // test hooks
+  _scanFailureOutcome: scanFailureOutcome,
+  _claimScanRequest: claimScanRequest,
+  _relabelVerdict: relabelVerdict,
+  _replayScanRequest: replayScanRequest,
+  SCAN_CLAIM_STALE_MS,
   _isPlatformListing: isPlatformListing,
   _hasEntityName: hasEntityName,
 };

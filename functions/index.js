@@ -19,15 +19,23 @@
 
 const {
   onCall,
+  onRequest,
   HttpsError,
 } = require("firebase-functions/v2/https");
+
+const {
+  handleSsvCallback,
+  getFreeUsage,
+} = require("./adGate");
 
 const admin =
   require("firebase-admin");
 
 const {
   executeScan,
+  settledScanOutcome,
 } = require("./scanWorkflow");
+const { recordScanEvent } = require("./scanDeliveryEvents");
 
 const {
   getEntitlement,
@@ -154,10 +162,48 @@ admin.initializeApp();
 const db =
   admin.firestore();
 
+// TESTING ONLY: the sudo account is never charged, blocked, or ad-gated.
+const TESTER_EMAIL = "grindmasterfire@gmail.com";
+
+function isTesterToken(decoded) {
+  return !!(
+    decoded &&
+    decoded.email &&
+    decoded.email_verified !== false &&
+    decoded.email.toLowerCase() === TESTER_EMAIL
+  );
+}
+
 function serverTimestamp() {
   return admin.firestore.FieldValue
     .serverTimestamp();
 }
+
+/**
+ * AdMob Server-Side Verification callback. Google calls this with an
+ * ECDSA-signed query when a viewer earns a rewarded-ad reward; a verified
+ * call creates the single-use ticket the scan gate requires. Configure this
+ * URL on the production ad unit in the AdMob console.
+ */
+exports.admobSsv = onRequest(
+  { region: "us-central1", timeoutSeconds: 30, memory: "256MiB" },
+  async (req, res) => {
+    if (req.method !== "GET") {
+      res.status(405).send("method not allowed");
+      return;
+    }
+    const url = req.originalUrl || req.url || "";
+    const q = url.indexOf("?");
+    try {
+      const out = await handleSsvCallback(db, q >= 0 ? url.slice(q + 1) : "");
+      res.status(out.status).send(out.body);
+    } catch (e) {
+      console.error("[admobSsv] failed:", e.message);
+      // Non-200 makes AdMob retry the callback.
+      res.status(500).send("error");
+    }
+  }
+);
 
 /**
  * Production scan endpoint.
@@ -175,14 +221,16 @@ exports.scan = onCall(
       // WHY: learn who is scanning. Guests send no token and are allowed
       // through as uid=null; only a present-but-invalid token is ignored.
       let uid = null;
+      let isTester = false;
       try {
         const h = (request.rawRequest && request.rawRequest.headers && request.rawRequest.headers.authorization) || "";
         if (h.startsWith("Bearer ")) {
           const decoded = await admin.auth().verifyIdToken(h.slice(7));
           uid = decoded.uid;
+          isTester = isTesterToken(decoded);
         }
       } catch (e) { uid = null; }
-      return executeScan(db, serverTimestamp, request.data || {}, uid);
+      return executeScan(db, serverTimestamp, request.data || {}, uid, { isTester });
     })()
 );
 
@@ -212,14 +260,15 @@ exports.deepDive = onCall(
         const decoded = await admin.auth().verifyIdToken(h.slice(7));
         uid = decoded.uid;
         // TESTING ONLY: sudo bypasses deep-dive top-up requirement.
-        isTester = decoded.email && decoded.email.toLowerCase() === "grindmasterfire@gmail.com";
+        isTester = isTesterToken(decoded);
       }
     } catch (e) { uid = null; }
     const ddEntitlement = await checkDeepDiveEntitlement(db, uid, isTester);
     if (!ddEntitlement.allowed) {
       throw new HttpsError(
         "resource-exhausted",
-        "Deep dive requires a top-up credit."
+        "Deep dive requires a top-up credit.",
+        { code5: "40201" }
       );
     }
 
@@ -267,7 +316,8 @@ exports.deepDive = onCall(
     if (!diveConsume.consumed) {
       throw new HttpsError(
         "resource-exhausted",
-        "Deep dive requires a top-up credit."
+        "Deep dive requires a top-up credit.",
+        { code5: "40201" }
       );
     }
 
@@ -593,7 +643,8 @@ exports.getQuotaStatus = onCall(
     if (!uid) throw new HttpsError("unauthenticated", "Sign-in required.");
     const result = await checkEntitlement(db, uid);
     if (result.tier === "free") {
-      return { tier: "free" };
+      // Server-owned weekly free scan; the device's own count is display-only.
+      return { tier: "free", ...(await getFreeUsage(db, uid)) };
     }
     const remaining = Math.max(0, (result.scansAllowed || 0) - (result.scansUsed || 0));
 
@@ -693,11 +744,31 @@ exports.getScanResult = onCall(
     if (!requestId) throw new HttpsError("invalid-argument", "requestId required.");
 
     try {
+      // received: false tells the app the scan request never arrived, so
+      // it can resend it (the scan endpoint dedups by request ID).
       const snap = await db.collection("scan_results").doc(requestId).get();
-      if (!snap.exists) return { ready: false };
+      if (!snap.exists) return { ready: false, received: false };
       const resultData = snap.data();
-      delete resultData.createdAt;
-      return { ready: true, result: resultData };
+      // Only the account that ran the scan may read it back. Indistinguishable
+      // from "not ready" so request ids can't be probed.
+      const callerUid = (request.auth && request.auth.uid) || null;
+      if ((resultData.uid || null) !== callerUid) return { ready: false, received: false };
+      const outcome = settledScanOutcome(resultData);
+      if (outcome.state === "pending") return { ready: false, received: true };
+      if (resultData.pending) {
+        // A claim that never got an outcome: report it to the Business Center.
+        await recordScanEvent(db, "stale_claim", { requestId, uid: callerUid });
+      }
+      // A failed scan is an outcome too: hand back its code and message.
+      if (outcome.state === "failed") {
+        return {
+          ready: true,
+          failed: true,
+          code5: outcome.code5,
+          message: outcome.message,
+        };
+      }
+      return { ready: true, result: outcome.result };
     } catch (e) {
       console.warn("[getScanResult] read failed:", e.message);
       return { ready: false };

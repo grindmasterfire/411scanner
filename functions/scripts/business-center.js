@@ -19,6 +19,16 @@
  * node scripts/business-center.js revenue [today|week|month]
  * node scripts/business-center.js trend   (this week vs last week)
  *
+ * Operations (scripts/businessCenterOpsReaders.js; period is
+ * today|week|month or Nd for trailing days):
+ * node scripts/business-center.js delivery [period]   scan delivery
+ * node scripts/business-center.js adgate [period]     ad-gate readiness
+ * node scripts/business-center.js failures [14d]      mass-failure detector
+ * node scripts/business-center.js refusals [7d]       search-refusal tracker
+ * node scripts/business-center.js prepaid [month]     prepaid balances
+ * node scripts/business-center.js quality [period]    research quality
+ * node scripts/business-center.js state [--out file]  JSON state for AI sessions
+ *
  * Calendar periods use UTC deliberately so accounting boundaries do not
  * depend on the workstation's local timezone.
  */
@@ -38,6 +48,11 @@ const {
 const {
   REVENUE_EVENTS_COLLECTION,
 } = require("../revenueEvents");
+
+const {
+  runOpsReport,
+  OPS_MODES,
+} = require("./businessCenterOpsReaders");
 
 const PROJECT_ID =
   process.env.FIREBASE_PROJECT_ID ||
@@ -695,6 +710,15 @@ async function main() {
     return;
   }
 
+  if (OPS_MODES.includes(mode)) {
+    await runOpsReport(
+      { db, admin, projectId: PROJECT_ID, getPeriodStart },
+      mode,
+      process.argv.slice(3)
+    );
+    return;
+  }
+
   if (mode === "trend") {
     await readTrend();
     return;
@@ -737,7 +761,8 @@ async function main() {
     )
   ) {
     throw new Error(
-      "Use one of: last, today, week, month, revenue [today|week|month], trend"
+      "Use one of: last, today, week, month, revenue [today|week|month], trend, " +
+        OPS_MODES.join(", ")
     );
   }
 

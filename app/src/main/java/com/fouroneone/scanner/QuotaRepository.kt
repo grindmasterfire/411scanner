@@ -11,10 +11,10 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * Server quota for paid subscribers. The subscription scan bucket lives
- * in Firestore; the client fetches it for display (badge "23/30").
- * Null when the user is free tier, tester, or the fetch fails — the
- * badge falls back to its local states.
+ * Server-owned quota. Paid tiers: the subscription bucket (badge "23/30").
+ * Free tier (tier == "free"): the weekly free scan, counted by the server's
+ * ad gate — scansAllowed/scansUsed are the free window's numbers.
+ * Null when the user is the tester, signed out, or the fetch fails.
  */
 data class ServerQuota(
     val tier: String,
@@ -23,8 +23,13 @@ data class ServerQuota(
     val remaining: Int,
     val topUpScans: Int,
     val anniversaryEpochMs: Long? = null,
-    val family: FamilyInfo? = null
-)
+    val family: FamilyInfo? = null,
+    val freeWindowResetsAtMs: Long? = null
+) {
+    val isFree: Boolean get() = tier == "free"
+    /** Professional ("pro" in entitlementStore) is the only ad-free tier. */
+    val isProfessional: Boolean get() = tier == "pro"
+}
 
 data class FamilyInfo(
     val groupId: String,
@@ -65,9 +70,9 @@ object QuotaRepository {
     }
 
     /**
-     * Fetch the caller's subscription quota. Returns null for free tier,
-     * testers, guests, or any failure — callers must fall back to local
-     * quota state. Never throws.
+     * Fetch the caller's server quota (subscription bucket or free weekly
+     * scan). Returns null for guests without a token or on any failure —
+     * callers must fall back to local quota state. Never throws.
      */
     suspend fun fetchServerQuota(): ServerQuota? = withContext(Dispatchers.IO) {
         try {
@@ -93,7 +98,19 @@ object QuotaRepository {
 
             // onCall protocol wraps the return in {"result": {...}}
             val result = JSONObject(body).optJSONObject("result") ?: return@withContext null
-            if (result.optString("tier") == "free") return@withContext null
+            if (result.optString("tier") == "free") {
+                val allowed = result.optInt("freeScansAllowed", 1)
+                val used = result.optInt("freeScansUsed", 0)
+                return@withContext ServerQuota(
+                    tier = "free",
+                    scansAllowed = allowed,
+                    scansUsed = used,
+                    remaining = (allowed - used).coerceAtLeast(0),
+                    topUpScans = 0,
+                    freeWindowResetsAtMs = result.optLong("freeWindowResetsAtMs")
+                        .takeIf { it > 0 }
+                )
+            }
 
             val familyJson = result.optJSONObject("family")
             val family = familyJson?.let {

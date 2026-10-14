@@ -85,16 +85,24 @@ const MASTER_CALIBRATION_RULER = Object.freeze({
       label: "PROFESSIONAL CONSIDERATION ONLY",
       action: "Understand professionally",
     }),
+    // 8.0+ ladder unified 2026-10-14 (owner's tiers are the source of
+    // truth; the app's report button follows it: report from 8.5).
     Object.freeze({
       min: 8.0,
+      max: 8.4,
+      label: "DELETE FROM DEVICE",
+      action: "Remove it",
+    }),
+    Object.freeze({
+      min: 8.5,
       max: 8.9,
-      label: "PASS ON THIS ONE",
-      action: "Walk away",
+      label: "DELETE FROM DEVICE AND REPORT",
+      action: "Remove it and report it",
     }),
     Object.freeze({
       min: 9.0,
       max: 9.9,
-      label: "REMOVE FROM PLATFORM",
+      label: "REPORT TO PLATFORM",
       action: "Platform/ecosystem intervention",
     }),
     Object.freeze({

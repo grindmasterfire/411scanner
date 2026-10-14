@@ -127,6 +127,7 @@ dependencies {
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
+  implementation(libs.androidx.work.runtime.ktx)
 
   // implementation(libs.androidx.navigation.compose)
 
@@ -180,6 +181,7 @@ dependencies {
   testImplementation(libs.junit)
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation(libs.robolectric)
+  testImplementation(libs.androidx.work.testing)
   testImplementation(libs.roborazzi)
   testImplementation(libs.roborazzi.compose)
   testImplementation(libs.roborazzi.junit.rule)

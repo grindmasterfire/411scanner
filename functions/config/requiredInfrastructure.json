@@ -1,0 +1,19 @@
+{
+  "_doc": "Required-infrastructure exceptions (ruling 2026-10-14, D&B Dilemma). A target that ordinary businesses cannot realistically avoid keeps every finding, but its Action Meter is capped at `score` with these `instructions`. `match` lists names that identify the entity (whole words, case-insensitive). `domains` are the entity's own domains: if the scanned target points anywhere else (besides an app store), it may be an impersonator and the exception does not apply. Add an entry here to add an exception: no code change. See functions/requiredInfrastructure.js.",
+  "entries": [
+    {
+      "id": "dun-and-bradstreet",
+      "entity": "Dun & Bradstreet, Inc.",
+      "match": [
+        "dun & bradstreet",
+        "dun and bradstreet",
+        "myd&b"
+      ],
+      "domains": [
+        "dnb.com"
+      ],
+      "score": 7.9,
+      "instructions": "Professional consideration. Dun & Bradstreet is required business infrastructure: D-U-N-S numbers and D&B records are used in business verification, credit, and contracting, and some platforms require one. Every finding in this report stands in full, including the FTC's 2022 order and the 2025 $5.7 million settlement. Deal with it professionally: read renewal terms and sales claims carefully and keep records."
+    }
+  ]
+}

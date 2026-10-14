@@ -118,9 +118,18 @@ async function loadScan(requestId) {
     return { businessData, isBusinessMode: true };
   }
 
+  // Debug-build client log uploaded from the app's Diagnostics sheet, keyed
+  // by the same requestId. Failed scans may have this but no receipt.
+  const diagDoc = await db.collection("client_diagnostics").doc(targetId).get();
+  const diagnostics = diagDoc.exists ? diagDoc.data() : null;
+
   // Load from scan_cache via the receipt's cacheKey
   const receiptDoc = await db.collection("scan_receipts").doc(targetId).get();
   if (!receiptDoc.exists) {
+    if (diagnostics) {
+      console.log(`No receipt for ${targetId}; using client diagnostics only.`);
+      return { diagnostics, requestId: targetId, isDiagnosticsOnly: true };
+    }
     throw new Error(`No receipt found for ${targetId}`);
   }
   const receipt = receiptDoc.data();
@@ -135,7 +144,16 @@ async function loadScan(requestId) {
     throw new Error(`No cached report for key ${cacheKey}`);
   }
 
-  return { receipt, report: cacheDoc.data(), requestId: targetId };
+  return { receipt, report: cacheDoc.data(), requestId: targetId, diagnostics };
+}
+
+function buildDiagnosticsContext(diagnostics) {
+  const lines = diagnostics.lines || [];
+  let ctx = `=== CLIENT DIAGNOSTICS (Android debug build, ${lines.length} lines) ===\n`;
+  ctx += `Uploaded: ${diagnostics.createdAt?.toDate?.()?.toISOString?.() || "unknown"}\n`;
+  ctx += `App: ${diagnostics.appVersion || "?"} (${diagnostics.buildType || "?"})\n`;
+  ctx += lines.join("\n") + "\n\n";
+  return ctx;
 }
 
 function buildBusinessContext(data) {
@@ -291,9 +309,11 @@ function buildContext(receipt, cached) {
   ctx += `The 411 Scanner uses a 1-10 action meter:\n`;
   ctx += `- 1-5.5: Lower risk, shows verified contact info\n`;
   ctx += `- 5.6+: Higher risk, shows fog light of alternatives\n`;
-  ctx += `- 8: Do not put on device\n`;
-  ctx += `- 9: Report to platform\n`;
-  ctx += `- 10: Malware/dangerous\n`;
+  ctx += `- 7.0-7.9: Professional consideration only\n`;
+  ctx += `- 8.0-8.4: Delete from device\n`;
+  ctx += `- 8.5-8.9: Delete from device and report\n`;
+  ctx += `- 9.0-9.9: Report to platform\n`;
+  ctx += `- 10: Delete from earth\n`;
   ctx += `Score is calculated from 6 risk vectors. Positive factors (longevity, reviews) should offset negatives.\n\n`;
 
   return ctx;
@@ -321,9 +341,16 @@ async function main() {
   if (loaded.isBusinessMode) {
     context = buildBusinessContext(loaded.businessData);
     greeting = "I have the business center data loaded across recent scans. Ask me about costs, token usage, trends, or efficiency.";
+  } else if (loaded.isDiagnosticsOnly) {
+    context = `You are diagnosing a 411 Scanner scan from the Android client's side. `;
+    context += `No server receipt exists for this requestId, so the scan likely failed before completing. `;
+    context += `Answer based only on the client log below; say so when the log can't tell.\n\n`;
+    context += buildDiagnosticsContext(loaded.diagnostics);
+    greeting = "I only have the Android client log for this scan (no server receipt). Ask me what the client saw.";
   } else {
-    const { receipt, report } = loaded;
+    const { receipt, report, diagnostics } = loaded;
     context = buildContext(receipt, report);
+    if (diagnostics) context += buildDiagnosticsContext(diagnostics);
     greeting = "I have the scan context loaded. Ask me anything about why I produced the output I did.";
   }
 

@@ -18,6 +18,24 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Debug-build client diagnostics: uploaded by explicit user action from
+    // the Android Diagnostics sheet. Owner-only writes; no client reads.
+    match /client_diagnostics/{requestId} {
+      function validDiag() {
+        return request.auth != null
+          && requestId.matches('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+          && request.resource.data.keys().hasOnly(
+               ['requestId', 'uid', 'createdAt', 'appVersion', 'buildType', 'lineCount', 'lines'])
+          && request.resource.data.requestId == requestId
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.lines is list
+          && request.resource.data.lines.size() <= 300;
+      }
+      allow create: if validDiag();
+      allow update: if validDiag() && resource.data.uid == request.auth.uid;
+      allow read, delete: if false;
+    }
+
     // Default deny for all other collections
     match /{document=**} {
       allow read, write: if false;
