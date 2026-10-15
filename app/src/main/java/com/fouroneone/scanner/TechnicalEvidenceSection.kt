@@ -111,14 +111,7 @@ fun TechnicalEvidenceSection(
                     if (receipt.hasInspectableSource()) {
                         OutlinedButton(
                             onClick = {
-                                context.startActivity(
-                                    Intent(
-                                        Intent.ACTION_VIEW,
-                                        Uri.parse(
-                                            receipt.sourceUrl
-                                        )
-                                    )
-                                )
+                                SafeLinks.openWebPage(context, receipt.sourceUrl)
                             }
                         ) {
                             Text("Inspect Source")
@@ -166,11 +159,42 @@ private fun TechnicalEvidenceReceipt.displayFinding():
             "not_applicable" ->
                 "Not applicable."
 
+            // Codes from reports cached before 2026-10-15.
             "unresolved" ->
-                "Research could not resolve this field."
+                "We found a report, but no live source confirms it."
 
             "not_researched" ->
-                "Not researched in this investigation."
+                "No public record was established for this field."
+
+            "searched_not_found" ->
+                "We searched and this record wasn't found."
+
+            "searched_redacted" ->
+                "We found the record, but it is privacy-protected or redacted."
+
+            "searched_paywalled" ->
+                "The record exists but sits behind a paywall or login."
+
+            "searched_removed" ->
+                "A record existed but has been deleted or taken down."
+
+            "searched_corrupted" ->
+                "We found the record, but it is broken or unreadable."
+
+            "searched_conflicting" ->
+                "Sources disagree, and none settles it."
+
+            "searched_too_new" ->
+                "This target is too new to have a public record yet."
+
+            "searched_beyond_scope" ->
+                "The record exists but requires an official request or offline access."
+
+            "searched_blocked" ->
+                "The site's bot protection blocked our scanner."
+
+            "searched_unconfirmed" ->
+                "We found a report, but no live source confirms it."
 
             else ->
                 "No finding supplied."
@@ -215,7 +239,7 @@ internal fun isInspectableTechnicalSource(
     // 2026-10-14: Inspect Source was triggering APK downloads because a receipt
     // carried a storage.googleapis.com APK URL as its source_url.
     val path = uri.path.orEmpty().lowercase()
-    val fileExtensions = listOf(".apk", ".pdf", ".zip", ".exe", ".dmg", ".msi", ".aab")
+    val fileExtensions = listOf(".apk", ".pdf", ".zip", ".exe", ".dmg", ".msi", ".aab", ".pkg", ".rar", ".7z", ".ipa", ".bin")
     if (fileExtensions.any { path.endsWith(it) }) {
         return false
     }

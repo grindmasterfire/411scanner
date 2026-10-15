@@ -62,17 +62,51 @@ function cleanDomain(raw) {
   return d;
 }
 
+/*
+ * Platforms that host other people's pages. Probing them measures the
+ * platform (LinkedIn's servers, Google's registrant), not the business on
+ * the page: a Walmart LinkedIn scan reported LinkedIn Corporation as the
+ * registrant. Never a probe target.
+ */
+const PLATFORM_HOSTS = [
+  "play.google.com", "apps.apple.com", "itunes.apple.com",
+  "linkedin.com", "facebook.com", "fb.com", "fb.me", "m.facebook.com", "instagram.com",
+  "x.com", "twitter.com", "t.co", "tiktok.com", "youtube.com", "youtu.be",
+  "reddit.com", "pinterest.com", "snapchat.com", "threads.net", "whatsapp.com", "wa.me",
+  "t.me", "telegram.me", "discord.gg", "discord.com", "medium.com", "substack.com",
+  "linktr.ee", "beacons.ai", "google.com", "sites.google.com", "docs.google.com",
+  "forms.gle", "bit.ly", "tinyurl.com", "1drv.ms", "onedrive.live.com", "dropbox.com",
+  "amazon.com", "ebay.com", "etsy.com", "whatnot.com", "shopify.com", "myshopify.com",
+  // Mail providers: an email screenshot is about the sender, not the inbox.
+  "outlook.com", "outlook.office.com", "office.com", "office365.com", "live.com", "hotmail.com",
+  "microsoft.com", "gmail.com", "mail.google.com", "googlemail.com", "yahoo.com", "mail.yahoo.com",
+  "aol.com", "icloud.com", "me.com", "mail.com", "proton.me", "protonmail.com", "zoho.com", "gmx.com",
+];
+
+function isPlatformHost(candidate) {
+  let host = String(candidate || "").trim().toLowerCase();
+  if (host.includes("://")) {
+    try {
+      host = new URL(host).hostname;
+    } catch (e) {
+      return false;
+    }
+  }
+  host = host.split("/")[0].split(":")[0].replace(/^www\./, "");
+  return PLATFORM_HOSTS.some((p) => host === p || host.endsWith(`.${p}`));
+}
+
 function pickTarget(linkEvidence, candidateDomain) {
   const links =
     (linkEvidence && Array.isArray(linkEvidence.links) && linkEvidence.links) ||
     [];
   for (const link of links) {
-    const d = cleanDomain((link && link.finalDomain) || "");
-    if (d) return d;
-    const fromUrl = cleanDomain((link && link.finalUrl) || "");
-    if (fromUrl) return fromUrl;
+    const d = cleanDomain((link && link.finalDomain) || "") ||
+      cleanDomain((link && link.finalUrl) || "");
+    if (d && !isPlatformHost(d)) return d;
   }
-  return cleanDomain(candidateDomain);
+  const fallback = cleanDomain(candidateDomain);
+  return fallback && !isPlatformHost(fallback) ? fallback : null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -325,13 +359,24 @@ const RDAP_BASE = {
   app: "https://rdap.nic.google/domain/",
 };
 
-function fetchJson(url, timeoutMs) {
+function fetchJson(url, timeoutMs, redirectsLeft = 2) {
   return withTimeout(
     new Promise((resolve, reject) => {
       const req = https.get(
         url,
         { headers: { "User-Agent": SCANNER_UA, Accept: "application/json" } },
         (res) => {
+          const location = res.headers.location;
+          if ([301, 302, 303, 307, 308].includes(res.statusCode) && location && redirectsLeft > 0) {
+            res.destroy();
+            const next = new URL(location, url).toString();
+            if (!next.startsWith("https://")) {
+              reject(new Error("rdap redirect not https"));
+              return;
+            }
+            fetchJson(next, timeoutMs, redirectsLeft - 1).then(resolve, reject);
+            return;
+          }
           if (res.statusCode !== 200) {
             res.destroy();
             reject(new Error(`rdap http ${res.statusCode}`));
@@ -365,24 +410,85 @@ function fetchJson(url, timeoutMs) {
   ).catch(() => null);
 }
 
-async function checkDomainAge(domain) {
+function vcardFields(entity) {
+  const props = Array.isArray(entity?.vcardArray?.[1]) ? entity.vcardArray[1] : [];
+  const get = (name) => props.find((p) => p[0] === name)?.[3];
+  const adr = get("adr");
+  const parts = Array.isArray(adr) ? adr : [];
+  // Redaction placeholders are not data.
+  const clean = (v) => {
+    const t = typeof v === "string" ? v.trim() : "";
+    return /redacted|withheld|not disclosed|privacy/i.test(t) ? "" : t;
+  };
+  return {
+    name: clean(get("fn")),
+    org: clean(get("org")),
+    street: clean(Array.isArray(parts[2]) ? parts[2].join(", ") : parts[2]),
+    city: clean(parts[3]),
+    region: clean(parts[4]),
+    postal: clean(parts[5]),
+    country: clean(parts[6]),
+  };
+}
+
+function findEntity(entities, role) {
+  for (const e of Array.isArray(entities) ? entities : []) {
+    if (Array.isArray(e.roles) && e.roles.includes(role)) return e;
+    const nested = findEntity(e.entities, role);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+const REDACTED_TEXT = /redacted|privacy|withheld|proxy|not disclosed|data protected|contact privacy|domains by proxy/i;
+
+/*
+ * Registry record via RDAP: domain age, registrar, and whatever the
+ * registrant record shows. The registry (thin for .com) names the
+ * registrar; the registrar's own RDAP, linked from it, holds the
+ * registrant. A redacted registrant often still shows state and country.
+ */
+async function checkRdap(domain) {
   try {
     const tld = domain.split(".").pop().toLowerCase();
-    const base = RDAP_BASE[tld];
-    if (!base) return null;
-    const data = await fetchJson(
-      base + encodeURIComponent(domain),
-      RDAP_TIMEOUT_MS
+    // Known registries directly; any other ending via the IANA bootstrap.
+    const base = RDAP_BASE[tld] || "https://rdap.org/domain/";
+    const data = await fetchJson(base + encodeURIComponent(domain), RDAP_TIMEOUT_MS);
+    if (!data) return null;
+
+    let ageDays = null;
+    const reg = (data.events || []).find((e) => e.eventAction === "registration" && e.eventDate);
+    const created = reg ? Date.parse(reg.eventDate) : NaN;
+    if (!Number.isNaN(created)) {
+      const days = Math.floor((Date.now() - created) / 86400000);
+      ageDays = days >= 0 ? days : null;
+    }
+
+    let registrar = vcardFields(findEntity(data.entities, "registrar")).name || "";
+    const tidy = (name) => String(name || "").replace(/\.+$/, "");
+    let registrantEntity = findEntity(data.entities, "registrant");
+
+    const related = (data.links || []).find(
+      (l) => l.rel === "related" && /rdap/.test(String(l.type || "")) && /^https:\/\//.test(String(l.href || ""))
     );
-    if (!data || !Array.isArray(data.events)) return null;
-    const reg = data.events.find(
-      (e) => e.eventAction === "registration" && e.eventDate
-    );
-    if (!reg) return null;
-    const created = Date.parse(reg.eventDate);
-    if (Number.isNaN(created)) return null;
-    const days = Math.floor((Date.now() - created) / 86400000);
-    return days >= 0 ? days : null;
+    if (related) {
+      const detail = await fetchJson(related.href, RDAP_TIMEOUT_MS);
+      if (detail) {
+        registrar = registrar || vcardFields(findEntity(detail.entities, "registrar")).name || "";
+        registrantEntity = findEntity(detail.entities, "registrant") || registrantEntity;
+      }
+    }
+
+    let registrant = null;
+    if (registrantEntity) {
+      const f = vcardFields(registrantEntity);
+      const identity = f.org || f.name;
+      registrant = {
+        ...f,
+        redacted: !identity || REDACTED_TEXT.test(identity),
+      };
+    }
+    return { ageDays, registrar: tidy(registrar), registrant };
   } catch (e) {
     return null;
   }
@@ -576,6 +682,23 @@ async function checkAsnOrg(ipAddress) {
   }
 }
 
+/*
+ * Network operator name for an ASN (Team Cymru AS lookup).
+ * Format: "53831 | US | arin | 2010-12-21 | SQUARESPACE, US"
+ */
+async function checkAsnName(asn) {
+  const num = String(asn || "").replace(/[^0-9]/g, "");
+  if (!num) return "";
+  const records = await withTimeout(
+    dns.resolveTxt(`AS${num}.asn.cymru.com`),
+    PER_CHECK_TIMEOUT_MS,
+    "cymru-as"
+  ).catch(() => null);
+  if (!records || records.length === 0) return "";
+  const parts = records.flat().join(" ").split("|").map((p) => p.trim());
+  return parts[4] || "";
+}
+
 /* ------------------------------------------------------------------ */
 /* subdomains via crt.sh Certificate Transparency — raw, as observed    */
 /* ------------------------------------------------------------------ */
@@ -625,10 +748,10 @@ async function runNetworkProbe(linkEvidence, candidateDomain) {
       .toLowerCase()
       .replace(/^www\./i, "");
 
-    const [tlsR, hostR, ageR, mxR, dmarcR, trackR, subR] = await Promise.allSettled([
+    const [tlsR, hostR, rdapR, mxR, dmarcR, trackR, subR] = await Promise.allSettled([
       checkTls(domain),
       checkHosting(domain),
-      checkDomainAge(apexDomain),
+      checkRdap(apexDomain),
       checkMailServers(apexDomain),
       checkDmarcSpf(apexDomain),
       checkTrackingIds(domain),
@@ -638,10 +761,10 @@ async function runNetworkProbe(linkEvidence, candidateDomain) {
       tlsR.status === "fulfilled" && tlsR.value ? tlsR.value.status : "unreachable";
     const hosting =
       hostR.status === "fulfilled" && hostR.value ? hostR.value : null;
+    const rdap =
+      rdapR.status === "fulfilled" && rdapR.value ? rdapR.value : null;
     const ageDays =
-      ageR.status === "fulfilled" && typeof ageR.value === "number"
-        ? ageR.value
-        : null;
+      rdap && typeof rdap.ageDays === "number" ? rdap.ageDays : null;
     const mx =
       mxR.status === "fulfilled" ? mxR.value : null;
     const dmarcSpf =
@@ -668,6 +791,9 @@ async function runNetworkProbe(linkEvidence, candidateDomain) {
       const ipv4 = addrs?.find((a) => a.family === 4)?.address;
       if (ipv4) {
         asnOrg = await checkAsnOrg(ipv4).catch(() => null);
+        if (asnOrg && asnOrg.asn) {
+          asnOrg.name = await checkAsnName(asnOrg.asn).catch(() => "");
+        }
       }
     } catch (e) {
       // best-effort only
@@ -690,6 +816,8 @@ async function runNetworkProbe(linkEvidence, candidateDomain) {
       tracking_ids: tracking,
       asn_org: asnOrg,
       subdomains: subdomains,
+      registrar: rdap ? rdap.registrar : "",
+      registrant: rdap ? rdap.registrant : null,
     };
   } catch (e) {
     return { measured: false, measured_at: stamp };
@@ -787,16 +915,18 @@ function applyMeasuredLedger(report, probe) {
   // schema defines so Android parsing is never a type mismatch.
   const infra = ledger.infrastructure || (ledger.infrastructure = {});
 
-  // ip_addresses: probe returns string[] from DNS lookup; merge with any IPs
-  // Gemini may have grounded from research — don't clobber if already populated.
+  /*
+   * The server's measurement replaces whatever Gemini wrote in these fields.
+   * A Walmart LinkedIn scan showed Gemini's "mx.walmart.com" stamped as a
+   * Network Probe measurement of linkedin.com: model values must never
+   * ride under the probe's name.
+   */
   if (probe.ip_addresses && probe.ip_addresses.length > 0) {
-    const existing = Array.isArray(infra.ip_addresses) ? infra.ip_addresses : [];
-    const merged = [...new Set([...existing, ...probe.ip_addresses])];
-    infra.ip_addresses = merged;
+    infra.ip_addresses = [...new Set(probe.ip_addresses)];
   }
 
   // mail_servers: probe returns [{priority,exchange}]; schema/Android expect string[]
-  if (probe.mail_servers && !infra.mail_servers) {
+  if (probe.mail_servers) {
     infra.mail_servers = probe.mail_servers
       .map((mx) => (typeof mx === "string" ? mx : mx.exchange || ""))
       .filter(Boolean);
@@ -804,10 +934,10 @@ function applyMeasuredLedger(report, probe) {
 
   // dmarc_record / spf_record: probe returns {dmarc,spf}; schema has two separate strings
   if (probe.dmarc_spf) {
-    if (!infra.dmarc_record && probe.dmarc_spf.dmarc) {
+    if (probe.dmarc_spf.dmarc) {
       infra.dmarc_record = probe.dmarc_spf.dmarc;
     }
-    if (!infra.spf_record && probe.dmarc_spf.spf) {
+    if (probe.dmarc_spf.spf) {
       infra.spf_record = probe.dmarc_spf.spf;
     }
   }
@@ -816,7 +946,7 @@ function applyMeasuredLedger(report, probe) {
   // WAF block: if probe was blocked by bot mitigation, mark explicitly
   if (probe.tracking_ids && probe.tracking_ids._wafBlocked) {
     infra.tracking_ids_waf_blocked = true;
-  } else if (probe.tracking_ids && !infra.tracking_ids) {
+  } else if (probe.tracking_ids) {
     infra.tracking_ids = Object.entries(probe.tracking_ids)
       .flatMap(([type, ids]) =>
         (Array.isArray(ids) ? ids : [ids]).map((id) => `${type}: ${id}`)
@@ -826,19 +956,19 @@ function applyMeasuredLedger(report, probe) {
 
   // asn / asn_organization: probe returns {asn,prefix,country,raw}; schema has two strings
   if (probe.asn_org) {
-    if (!infra.asn && probe.asn_org.asn) {
+    if (probe.asn_org.asn) {
       infra.asn = probe.asn_org.asn;
     }
-    if (!infra.asn_organization && probe.asn_org.raw) {
+    if (probe.asn_org.raw) {
       infra.asn_organization = probe.asn_org.raw;
     }
-    if (!infra.asn_country && probe.asn_org.country) {
+    if (probe.asn_org.country) {
       infra.asn_country = probe.asn_org.country;
     }
   }
 
   // subdomains: probe already returns string[] — direct write, correct format
-  if (probe.subdomains && !infra.subdomains) {
+  if (probe.subdomains && probe.subdomains.length) {
     infra.subdomains = probe.subdomains;
   }
 
@@ -853,16 +983,26 @@ function applyMeasuredLedger(report, probe) {
   const existingFields = new Set(receipts.map((r) => r.field));
   const domain = probe.domain || "";
 
-  function stampProbeReceipt(field, finding, sourceUrl = "") {
-    if (!finding || existingFields.has(field)) return;
-    receipts.push({
+  /*
+   * The server's own measurement owns these fields: it replaces any model
+   * receipt for the same field. Gemini has written "verified" receipts for
+   * probe fields citing the target's own site, which hid the measurement
+   * and sent Inspect Source to the (possibly scam) target.
+   */
+  function stampProbeReceipt(field, finding, sourceUrl = "", status = "verified", extra = {}) {
+    if (!finding) return;
+    const at = receipts.findIndex((r) => r.field === field);
+    const receipt = {
       field,
-      status: "verified",
+      status,
       finding,
       authority: "Network Probe",
       source_url: sourceUrl,
       subject: domain,
-    });
+      ...extra,
+    };
+    if (at >= 0) receipts[at] = receipt;
+    else receipts.push(receipt);
     existingFields.add(field);
   }
 
@@ -870,59 +1010,57 @@ function applyMeasuredLedger(report, probe) {
   const apex = probe.apex_domain || domain.replace(/^www\./i, "");
   const dnsVerifier = (type) => `https://mxtoolbox.com/SuperTool.aspx?action=${type}%3a${apex}`;
 
-  if (infra.ip_addresses && infra.ip_addresses.length > 0) {
+  // Each receipt only when the probe itself measured the value.
+  if (probe.ip_addresses && probe.ip_addresses.length > 0) {
     stampProbeReceipt(
       "infrastructure.ip_addresses",
       `Resolved IP addresses: ${infra.ip_addresses.join(", ")}`,
       `https://www.whatsmydns.net/#A/${apex}`
     );
   }
-  if (infra.mail_servers && infra.mail_servers.length > 0) {
+  if (probe.mail_servers && probe.mail_servers.length > 0) {
     stampProbeReceipt(
       "infrastructure.mail_servers",
       `Mail exchangers: ${infra.mail_servers.join(", ")}`,
       dnsVerifier("mx")
     );
   }
-  if (infra.dmarc_record) {
+  if (probe.dmarc_spf && probe.dmarc_spf.dmarc) {
     stampProbeReceipt(
       "infrastructure.dmarc_record",
       `DMARC record: ${infra.dmarc_record}`,
       dnsVerifier("dmarc")
     );
   }
-  if (infra.spf_record) {
+  if (probe.dmarc_spf && probe.dmarc_spf.spf) {
     stampProbeReceipt(
       "infrastructure.spf_record",
       `SPF record: ${infra.spf_record}`,
       dnsVerifier("spf")
     );
   }
-  if (infra.tracking_ids && infra.tracking_ids.length > 0) {
+  if (probe.tracking_ids && !probe.tracking_ids._wafBlocked && infra.tracking_ids && infra.tracking_ids.length > 0) {
     stampProbeReceipt(
       "infrastructure.tracking_ids",
       `Tracking IDs: ${infra.tracking_ids.join(", ")}`
     );
   } else if (infra.tracking_ids_waf_blocked) {
     // Explicit WAF block — not silently missing
-    receipts.push({
-      field: "infrastructure.tracking_ids",
-      status: "not_accessible",
-      finding: "Tracking ID probe blocked by CDN bot mitigation (WAF). The target uses bot protection that prevents automated page scraping.",
-      authority: "Network Probe",
-      source_url: "",
-      subject: domain,
-    });
-    existingFields.add("infrastructure.tracking_ids");
+    stampProbeReceipt(
+      "infrastructure.tracking_ids",
+      "The site's bot protection blocked our scanner from reading its page code, so its tracking IDs couldn't be collected.",
+      "",
+      "searched_blocked"
+    );
   }
-  if (infra.subdomains && infra.subdomains.length > 0) {
+  if (probe.subdomains && probe.subdomains.length > 0) {
     stampProbeReceipt(
       "infrastructure.subdomains",
       `Discovered subdomains: ${infra.subdomains.join(", ")}`,
       `https://crt.sh/?q=${apex}`
     );
   }
-  if (infra.asn) {
+  if (probe.asn_org && probe.asn_org.asn) {
     const asnNum = String(infra.asn).replace(/[^0-9]/g, "");
     stampProbeReceipt(
       "infrastructure.asn",
@@ -930,6 +1068,68 @@ function applyMeasuredLedger(report, probe) {
       asnNum ? `https://bgp.he.net/AS${asnNum}` : ""
     );
   }
+  // Registry record (RDAP): registrar and registrant, as the registry shows them.
+  const icannLookup = `https://lookup.icann.org/en/lookup?name=${encodeURIComponent(apex)}`;
+  if (probe.registrar) {
+    stampProbeReceipt(
+      "domain_registration.registrar",
+      `The official registry record for ${apex} lists the registrar as ${probe.registrar}.`,
+      icannLookup,
+      "verified",
+      { authority: "Domain registry (RDAP)", identifier: probe.registrar }
+    );
+  }
+  const registrant = probe.registrant;
+  if (registrant) {
+    const place = [registrant.city, registrant.region, registrant.country].filter(Boolean).join(", ");
+    if (!registrant.redacted) {
+      const who = registrant.org || registrant.name;
+      const address = [registrant.street, place, registrant.postal].filter(Boolean).join(", ");
+      stampProbeReceipt(
+        "domain_registration.registrant",
+        `The registry record for ${apex} lists the registrant as ${who}${address ? `, ${address}` : ""}.`,
+        icannLookup,
+        "verified",
+        { authority: "Domain registry (RDAP)", identifier: who }
+      );
+    } else {
+      stampProbeReceipt(
+        "domain_registration.registrant",
+        `The registry record for ${apex} withholds the registrant's name and street address behind ${probe.registrar || "the registrar"}'s privacy service` +
+          (place
+            ? `; it still lists the registrant's location as ${place}` +
+              (registrant.street ? " (a street address here is often the privacy service's own office)." : ".")
+            : ".") +
+          " The operator's business address comes from business records, not WHOIS.",
+        icannLookup,
+        "searched_redacted",
+        { authority: "Domain registry (RDAP)", identifier: place }
+      );
+    }
+  }
+
+  // Hosting company: the network that announces the site's IP address.
+  const asnName = probe.asn_org && probe.asn_org.name;
+  if (asnName) {
+    const asnNum = String(probe.asn_org.asn || "").replace(/[^0-9]/g, "");
+    stampProbeReceipt(
+      "infrastructure.origin_host",
+      `The site's servers are on network AS${asnNum}, operated by ${asnName}.`,
+      asnNum ? `https://bgp.he.net/AS${asnNum}` : "",
+      "verified",
+      { identifier: `AS${asnNum}` }
+    );
+  }
+  if (probe.host_cdn && probe.host_cdn !== "unknown") {
+    stampProbeReceipt(
+      "infrastructure.host_cdn",
+      /^direct \(/.test(probe.host_cdn)
+        ? `The site is served directly by its host (server: ${probe.host_cdn.slice(8, -1)}), with no separate content delivery network.`
+        : `The site's response headers identify ${probe.host_cdn} as its content delivery network.`,
+      `https://www.ssllabs.com/ssltest/analyze.html?d=${domain}`
+    );
+  }
+
   if (telemetry.tls_certificate_status) {
     stampProbeReceipt(
       "infrastructure.tls_issuer",
@@ -1008,10 +1208,11 @@ module.exports = {
   probeContextBlock,
   applyMeasuredLedger,
   applyRedirectPath,
+  isPlatformHost,
   // test hooks
   _pickTarget: pickTarget,
   _classifyCert: classifyCert,
   _detectCdn: detectCdn,
   _checkTls: checkTls,
-  _checkDomainAge: checkDomainAge,
+  _checkRdap: checkRdap,
 };

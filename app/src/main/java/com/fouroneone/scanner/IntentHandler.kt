@@ -60,13 +60,6 @@ object IntentHandler {
      * Launches the regulatory portal via standard browser intent.
      */
     fun launchAgencyPortal(context: Context, url: String) {
-        try {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            }
-            context.startActivity(intent)
-        } catch (e: Exception) {
-            Toast.makeText(context, "Could not open browser: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
+        SafeLinks.openWebPage(context, url)
     }
 }

@@ -197,16 +197,8 @@ fun openAlternativeUrl(
     context: Context,
     url: String
 ) {
-    try {
-        context.startActivity(
-            Intent(Intent.ACTION_VIEW, Uri.parse(url))
-        )
-    } catch (_: Exception) {
-        /*
-         * Navigation failure is non-fatal.
-         * Never invent a fallback destination.
-         */
-    }
+    // Never invent a fallback destination; never open a file download.
+    SafeLinks.openWebPage(context, url)
 }
 
 fun openAlternativeDialer(

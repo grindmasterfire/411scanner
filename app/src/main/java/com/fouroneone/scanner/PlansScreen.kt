@@ -179,7 +179,8 @@ fun PlansScreen(
                         val details = familyDetails
                         if (details != null) {
                             Text(
-                                text = "${details.members.size}/${details.maxSeats} seats used",
+                                text = "${details.members.size + details.pendingInvites.size}/${details.maxSeats} seats used" +
+                                    if (details.pendingInvites.isNotEmpty()) " (${details.pendingInvites.size} invited)" else "",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -206,13 +207,27 @@ fun PlansScreen(
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                             }
+
+                            details.pendingInvites.forEach { email ->
+                                PendingInviteRow(
+                                    email = email,
+                                    onCancel = {
+                                        coroutineScope.launch {
+                                            QuotaRepository.cancelFamilyInvite(email)
+                                            familyDetails = QuotaRepository.getFamilyDetails()
+                                        }
+                                    }
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
                         }
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
 
                     var inviteEmail by remember { mutableStateOf("") }
-                    var inviteResult by remember { mutableStateOf<String?>(null) }
+                    var inviteResult by remember { mutableStateOf<FamilyActionResult?>(null) }
+                    var inviteSending by remember { mutableStateOf(false) }
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -228,28 +243,32 @@ fun PlansScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
                             onClick = {
+                                inviteSending = true
                                 coroutineScope.launch {
-                                    val ok = QuotaRepository.inviteFamilySeat(inviteEmail.trim())
-                                    inviteResult = if (ok) "Invited!" else "Invite failed — check the email."
-                                    if (ok) {
+                                    val result = QuotaRepository.inviteFamilySeat(inviteEmail.trim())
+                                    inviteResult = result
+                                    inviteSending = false
+                                    if (result.ok) {
                                         inviteEmail = ""
                                         familyDetails = QuotaRepository.getFamilyDetails()
                                     }
                                 }
                             },
-                            enabled = inviteEmail.isNotBlank()
+                            enabled = inviteEmail.isNotBlank() && !inviteSending
                         ) {
-                            Text("Invite")
+                            Text(if (inviteSending) "Sending…" else "Invite")
                         }
                     }
 
                     inviteResult?.let {
-                        Spacer(modifier = Modifier.height(4.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = it,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (it == "Invited!") MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.error
+                            text = it.message,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (it.ok) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.error,
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
                 }
@@ -337,6 +356,41 @@ fun PlansScreen(
                     } ?: "Select a plan",
                     fontWeight = FontWeight.Bold
                 )
+            }
+        }
+    }
+}
+
+/**
+ * An invited email that hasn't accepted yet. It holds a seat until the
+ * person accepts, declines, or the owner cancels.
+ */
+@Composable
+private fun PendingInviteRow(
+    email: String,
+    onCancel: () -> Unit
+) {
+    androidx.compose.material3.Card(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = email,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Invited • waiting for them to accept",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            androidx.compose.material3.OutlinedButton(onClick = onCancel) {
+                Text("Cancel")
             }
         }
     }

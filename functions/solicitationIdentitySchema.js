@@ -33,6 +33,13 @@ const SOLICITATION_IDENTITY_SCHEMA = {
     offer_mechanic: {
       type: "string"
     },
+    // How the solicitation reached the user; catalogs the Cache Bank.
+    // Plain string: the response schema sits at Gemini's size limit (an
+    // enum or more fields here is rejected with 400). Email sender details
+    // are extracted server-side from the OCR text (emailSender.js).
+    channel: {
+      type: "string"
+    },
 
     confidence: {
       type: "string",

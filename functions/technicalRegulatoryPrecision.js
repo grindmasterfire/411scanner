@@ -17,12 +17,9 @@ const REGULATORY_FIELDS = [
   "review_spread",
 ];
 
-const EVIDENCE_STATES = new Set([
-  "unresolved",
-  "not_found",
-  "not_researched",
-  "not_applicable",
-]);
+// A regulatory field that isn't verified shows its receipt's explanation
+// (why we couldn't fill it), never a bare state code.
+const NOT_APPLICABLE = "not_applicable";
 
 function clean(value) {
   return typeof value === "string"
@@ -69,11 +66,8 @@ function enforceRegulatoryEvidencePrecision(
       );
 
     if (!receipt) {
-      if (current) {
-        regulatory[field] =
-          "not_researched";
-      }
-
+      // No receipt backs this narrative: it can't be shown as fact.
+      regulatory[field] = "";
       continue;
     }
 
@@ -81,26 +75,21 @@ function enforceRegulatoryEvidencePrecision(
       clean(receipt.status)
         .toLowerCase();
 
-    if (status === "verified") {
-      regulatory[field] =
-        clean(receipt.source_url)
-          ? current
-          : "unresolved";
-
+    if (status === "verified" && clean(receipt.source_url)) {
+      regulatory[field] = current;
       continue;
     }
 
-    if (EVIDENCE_STATES.has(status)) {
-      regulatory[field] =
-        status;
-
+    if (status === NOT_APPLICABLE) {
+      regulatory[field] = NOT_APPLICABLE;
       continue;
     }
 
+    // A "verified" claim with no source to open is only a report.
     regulatory[field] =
-      current
-        ? "not_researched"
-        : "";
+      status === "verified" && clean(receipt.finding)
+        ? `Reported, but not confirmed by a source you can open: ${clean(receipt.finding)}`
+        : clean(receipt.finding);
   }
 
   return ledger;

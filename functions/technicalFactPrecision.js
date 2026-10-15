@@ -135,7 +135,7 @@ function softenUnresolvedClaims(ledger) {
 
     const softened = softenCertainty(receipt.finding);
 
-    if (softened) {
+    if (softened && !softened.startsWith("Unresolved report:")) {
       receipt.finding = `Unresolved report: ${softened}`;
     }
   }

@@ -35,7 +35,7 @@ const {
 
 const { isCacheEntryFresh } = require("./cacheFreshness");
 
-const { isTelemetryGrounded } =
+const { isTelemetryGrounded, meetsReportStandard } =
   require("./groundingVerification");
 
 const {
@@ -52,6 +52,7 @@ const { resolveAllLinks } = require("./linkResolver");
 const {
   runNetworkProbe,
   applyMeasuredLedger,
+  isPlatformHost,
   applyRedirectPath,
 } = require("./networkProbe");
 
@@ -84,24 +85,68 @@ const { getVerdict } = require("./actionMeter");
 const AD_GATE_ENFORCED = process.env.AD_GATE_ENFORCED === "true";
 
 // App-store listing hosts: valid scan targets, but never probe targets.
-const PLATFORM_LISTING_HOSTS = [
-  "play.google.com",
-  "apps.apple.com",
-  "itunes.apple.com",
-];
+const { extractEmailSender } = require("./emailSender");
 
-function isPlatformListing(candidate) {
-  let host = String(candidate || "").trim().toLowerCase();
-  if (host.includes("://")) {
-    try {
-      host = new URL(host).hostname;
-    } catch (e) {
-      return false;
-    }
+/*
+ * Email solicitations: catalog the sender with the solicitation and give
+ * the client a receipt for it. Addresses come from the OCR text by strict
+ * pattern, so they're exact and carry nothing injectable.
+ */
+function applyEmailSender(report, ocrText, scannerEmail = "") {
+  const identity = report && report.solicitation_identity;
+  if (!identity) return;
+  identity.channel = String(identity.channel || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (identity.channel !== "email") return;
+  const sender = extractEmailSender(ocrText, { exclude: [scannerEmail] });
+  if (!sender) return;
+  Object.assign(identity, sender);
+
+  const notes = [];
+  if (sender.sender_is_free_mail) notes.push("a free webmail account, not a business domain");
+  if (sender.reply_to_differs) notes.push(`replies go to a different address, ${sender.reply_to_address}`);
+  const ledger = report.technical_ledger || (report.technical_ledger = {});
+  const receipts = ledger.evidence_receipts || (ledger.evidence_receipts = []);
+  if (sender.sender_address && !receipts.some((r) => r.field === "email.sender")) {
+    receipts.push({
+      field: "email.sender",
+      status: "verified",
+      finding:
+        `The email was sent from ${sender.sender_address}` +
+        (notes.length ? `: ${notes.join("; ")}.` : "."),
+      authority: "Screenshot text (411 server read)",
+      subject: sender.sender_domain,
+      identifier: sender.sender_address,
+      source_url: "",
+    });
   }
-  host = host.split("/")[0].split(":")[0].replace(/^www\./, "");
-  return PLATFORM_LISTING_HOSTS.includes(host);
 }
+
+/*
+ * Domains the finished report is about: the email's own sender domain, the
+ * official site, and the solicitation's destination. Empty when the report
+ * names none (then the probe can't be checked and is kept).
+ */
+function reportDomains(report) {
+  const identity = (report && report.solicitation_identity) || {};
+  const attribution = (report && report.technical_ledger && report.technical_ledger.attribution) || {};
+  return [
+    identity.channel === "email" && !identity.sender_is_free_mail ? identity.sender_domain : null,
+    attribution.official_domain,
+    identity.destination_domain,
+  ]
+    .map((d) => String(d || "").trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0].replace(/^www\./, ""))
+    .filter((d) => d.includes(".") && !isPlatformHost(d));
+}
+
+function probeBelongsToReport(probe, report) {
+  const domains = reportDomains(report);
+  if (!domains.length) return true;
+  const probed = String(probe.apex_domain || probe.domain || "").toLowerCase().replace(/^www\./, "");
+  return domains.some((d) => d === probed || d.endsWith(`.${probed}`) || probed.endsWith(`.${d}`));
+}
+
+// App stores, social networks, and file hosts: never probe targets.
+const isPlatformListing = (candidate) => isPlatformHost(candidate);
 
 const EMPTY_NAMES = ["", "unknown", "n/a", "na", "none", "null", "unidentified"];
 
@@ -331,6 +376,9 @@ async function executeScan(
     isCacheEntryFresh(exactEntry) &&
     isTelemetryGrounded(
       exactEntry.telemetry
+    ) &&
+    meetsReportStandard(
+      exactEntry.telemetry
     )
   ) {
     await recordCacheHit(db, cacheKey);
@@ -559,29 +607,50 @@ async function executeScan(
   const telemetry = result.telemetry;
   scanFacts.quality = researchQuality(report, telemetry);
 
-  // Server-owned infrastructure measurement (governance write).
-  applyMeasuredLedger(report, probe);
   // Deterministic redirect-path evidence (governance write).
   applyRedirectPath(report, linkEvidence);
-  let probeStatus = probe && probe.measured ? "measured" : "bypassed_no_target";
+  // Email screenshots: sender read from the screenshot text, never the model.
+  applyEmailSender(report, ocrText, caller.email);
 
-  // Fallback: OCR gave no URL, but the model resolved a target (from the
-  // image or by grounded search on the entity name). Probe that domain and
-  // re-apply so the Technical 411 fills whenever a domain is known.
-  if (!probe || !probe.measured) {
+  /*
+   * The probe must measure a domain this report is about. The first probe
+   * targets a domain read from the screenshot text, which can be app
+   * chrome or an OCR slip (Yahoo Mail's "mail.yahoo.com" read as
+   * "mailyahoo.com" put Yahoo's registrar on two senders' reports). If it
+   * matches none of the report's own domains, drop it and probe theirs.
+   */
+  const relatedProbe =
+    probe && probe.measured && probeBelongsToReport(probe, report) ? probe : null;
+  if (relatedProbe) {
+    // Server-owned infrastructure measurement (governance write).
+    applyMeasuredLedger(report, relatedProbe);
+  }
+  let probeStatus = relatedProbe
+    ? "measured"
+    : probe && probe.measured
+      ? "unrelated_probe_discarded"
+      : "bypassed_no_target";
+
+  // Fallback: OCR gave no usable URL, but the model resolved a target (from
+  // the image or by grounded search on the entity name). Probe that domain
+  // and re-apply so the Technical 411 fills whenever a domain is known.
+  if (!relatedProbe) {
     const tl = report.technical_ledger || {};
     const identity = report.solicitation_identity || {};
     const candidates = [
+      identity.channel === "email" && !identity.sender_is_free_mail ? identity.sender_domain : null,
       tl.network_telemetry && tl.network_telemetry.app_package_or_domain,
       tl.attribution && tl.attribution.official_domain,
       identity.destination_domain,
     ].filter((c) => c && String(c).includes("."));
+    const ownDomains = candidates.filter((c) => !isPlatformListing(c));
 
-    if (candidates.some(isPlatformListing)) {
-      // Probing Google's/Apple's infrastructure says nothing about the app
-      // behind the listing; proceed on OSINT + model analysis instead.
+    if (candidates.length && !ownDomains.length) {
+      // Only platform hosts (app store, LinkedIn, ...): their infrastructure
+      // says nothing about the business; proceed on OSINT + model analysis.
       probeStatus = "platform_target_no_probe";
-    } else if (candidates.length) {
+    } else if (ownDomains.length) {
+      candidates.splice(0, candidates.length, ...ownDomains);
       const fallbackProbe = await runNetworkProbe(null, candidates[0]);
       if (fallbackProbe && fallbackProbe.measured) {
         applyMeasuredLedger(report, fallbackProbe);
@@ -899,5 +968,7 @@ module.exports = {
   _replayScanRequest: replayScanRequest,
   SCAN_CLAIM_STALE_MS,
   _isPlatformListing: isPlatformListing,
+  _applyEmailSender: applyEmailSender,
+  _probeBelongsToReport: probeBelongsToReport,
   _hasEntityName: hasEntityName,
 };

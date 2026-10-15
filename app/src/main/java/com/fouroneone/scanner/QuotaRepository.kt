@@ -51,7 +51,21 @@ data class FamilyDetails(
     val groupId: String,
     val isOwner: Boolean,
     val maxSeats: Int,
-    val members: List<FamilyMember>
+    val members: List<FamilyMember>,
+    /** Emails invited but not yet accepted; each holds a seat. */
+    val pendingInvites: List<String> = emptyList()
+)
+
+/** A Family invite waiting for this account to accept or decline. */
+data class FamilyInvite(
+    val inviteId: String,
+    val ownerEmail: String
+)
+
+/** Outcome of a family action, with the server's message for the user. */
+data class FamilyActionResult(
+    val ok: Boolean,
+    val message: String
 )
 
 object QuotaRepository {
@@ -145,34 +159,98 @@ object QuotaRepository {
     }
 
     /**
-     * Invite a family member by email. Returns the email on success,
-     * null on any failure (caller shows a generic error).
+     * Call a family endpoint. Returns the callable "result" object, or the
+     * server's user-facing error message on failure.
      */
-    suspend fun inviteFamilySeat(email: String): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val idToken = AuthManager.currentIdToken() ?: return@withContext false
-
-            val payload = JSONObject().apply {
-                put("data", JSONObject().apply { put("email", email) })
+    private suspend fun callFamilyEndpoint(name: String, data: JSONObject): Pair<JSONObject?, String?> {
+        val idToken = AuthManager.currentIdToken()
+        if (idToken == null) {
+            Log.w(TAG, "$name: no ID token (not signed in?)")
+            return null to "Sign in to manage your Family plan."
+        }
+        val requestBody = JSONObject().put("data", data).toString()
+            .toRequestBody("application/json; charset=utf-8".toMediaType())
+        val request = Request.Builder()
+            .url("https://us-central1-scanner-4ea67.cloudfunctions.net/$name")
+            .post(requestBody)
+            .header("Authorization", "Bearer $idToken")
+            .build()
+        httpClient.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            val json = runCatching { JSONObject(body) }.getOrNull()
+            if (response.isSuccessful) {
+                return (json?.optJSONObject("result") ?: JSONObject()) to null
             }
-            val requestBody = payload.toString()
-                .toRequestBody("application/json; charset=utf-8".toMediaType())
+            val message = json?.optJSONObject("error")?.optString("message").orEmpty()
+            Log.w(TAG, "$name failed: ${response.code} $message")
+            return null to message.ifBlank { "Something went wrong. Try again." }
+        }
+    }
 
-            val request = Request.Builder()
-                .url("https://us-central1-scanner-4ea67.cloudfunctions.net/inviteFamilySeat")
-                .post(requestBody)
-                .header("Authorization", "Bearer $idToken")
-                .build()
-
-            val response = httpClient.newCall(request).execute()
-            val ok = response.isSuccessful
-            response.close()
-            ok
+    /**
+     * Invite a family member by email. They don't need an account yet:
+     * the invite waits until they sign in and accept it.
+     */
+    suspend fun inviteFamilySeat(email: String): FamilyActionResult = withContext(Dispatchers.IO) {
+        try {
+            val (result, error) = callFamilyEndpoint(
+                "inviteFamilySeat", JSONObject().put("email", email)
+            )
+            if (result != null) {
+                FamilyActionResult(true, "Invite sent to $email. They join when they open 411 Scanner and accept.")
+            } else {
+                FamilyActionResult(false, error ?: "Invite failed.")
+            }
         } catch (e: Exception) {
             Log.w(TAG, "inviteFamilySeat failed: ${e.message}")
+            FamilyActionResult(false, "Couldn't reach the server. Check your connection and try again.")
+        }
+    }
+
+    /** Owner cancels a pending invite. */
+    suspend fun cancelFamilyInvite(email: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            callFamilyEndpoint("cancelFamilyInvite", JSONObject().put("email", email)).first != null
+        } catch (e: Exception) {
+            Log.w(TAG, "cancelFamilyInvite failed: ${e.message}")
             false
         }
     }
+
+    /** Family invites addressed to the signed-in account. Empty on failure. */
+    suspend fun getFamilyInvites(): List<FamilyInvite> = withContext(Dispatchers.IO) {
+        try {
+            val result = callFamilyEndpoint("getFamilyInvites", JSONObject()).first
+                ?: return@withContext emptyList()
+            val arr = result.optJSONArray("invites") ?: return@withContext emptyList()
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                FamilyInvite(o.optString("inviteId"), o.optString("ownerEmail"))
+            }.filter { it.inviteId.isNotEmpty() }
+        } catch (e: Exception) {
+            Log.w(TAG, "getFamilyInvites failed: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /** Accept or decline a Family invite. */
+    suspend fun respondFamilyInvite(inviteId: String, accept: Boolean): FamilyActionResult =
+        withContext(Dispatchers.IO) {
+            try {
+                val (result, error) = callFamilyEndpoint(
+                    "respondFamilyInvite",
+                    JSONObject().put("inviteId", inviteId).put("accept", accept)
+                )
+                when {
+                    result == null -> FamilyActionResult(false, error ?: "Something went wrong. Try again.")
+                    accept -> FamilyActionResult(true, "You've joined the Family plan.")
+                    else -> FamilyActionResult(true, "Invite declined.")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "respondFamilyInvite failed: ${e.message}")
+                FamilyActionResult(false, "Couldn't reach the server. Check your connection and try again.")
+            }
+        }
 
     /**
      * Get detailed family group info for the admin board.
@@ -219,11 +297,17 @@ object QuotaRepository {
                 }
             }
 
+            val pendingJson = result.optJSONArray("pendingInvites")
+            val pending = (0 until (pendingJson?.length() ?: 0))
+                .map { pendingJson!!.getJSONObject(it).optString("email") }
+                .filter { it.isNotEmpty() }
+
             FamilyDetails(
                 groupId = result.optString("groupId"),
                 isOwner = result.optBoolean("isOwner"),
                 maxSeats = result.optInt("maxSeats", 4),
-                members = members
+                members = members,
+                pendingInvites = pending
             )
         } catch (e: Exception) {
             Log.w(TAG, "getFamilyDetails failed: ${e.message}")

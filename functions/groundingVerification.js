@@ -199,6 +199,74 @@ function buildGroundingVerification(response) {
 }
 
 /**
+ * Combine the grounding of several provider responses (the search-first
+ * pass and the full research pass) into one verification. Chunk indices
+ * are per-response, so each response's indices are offset past the ones
+ * before it; a source seen twice keeps one entry with both index sets.
+ */
+function mergeGroundingVerifications(verifications) {
+  const sources = [];
+  const byUri = new Map();
+  const supports = [];
+  let offset = 0;
+  let googleSearchQueryCount = 0;
+
+  for (const v of verifications) {
+    if (!v) continue;
+    googleSearchQueryCount += Number(v.googleSearchQueryCount) || 0;
+    let span = 0;
+    for (const source of v.sources || []) {
+      const indices = (source.chunkIndices || []).map((i) => i + offset);
+      for (const i of source.chunkIndices || []) span = Math.max(span, i + 1);
+      const existing = byUri.get(source.uri);
+      if (existing) {
+        existing.chunkIndices.push(...indices);
+        continue;
+      }
+      const merged = { ...source, chunkIndices: indices };
+      byUri.set(source.uri, merged);
+      sources.push(merged);
+    }
+    for (const support of v.supports || []) {
+      supports.push({
+        ...support,
+        groundingChunkIndices: (support.groundingChunkIndices || []).map((i) => i + offset),
+      });
+    }
+    offset += span;
+  }
+
+  return {
+    required: true,
+    verified: googleSearchQueryCount > 0 && sources.length > 0,
+    googleSearchQueryCount,
+    groundedSourceCount: sources.length,
+    groundingSupportCount: supports.length,
+    evidenceBasis: "provider_grounding_metadata",
+    sources,
+    supports,
+  };
+}
+
+/*
+ * Report standard. Cached reports are resold only if made under the
+ * current rules. 2 = 2026-10-15: search-first research, specific
+ * searched_* reasons (no "unresolved"/"not researched"), no download
+ * links. 3 = registry (RDAP) registrar/registrant and hosting receipts,
+ * business-address research beyond WHOIS. 4 = platform hosts (LinkedIn,
+ * social, app stores, file hosts) never probed; probe receipts carry only
+ * probe-measured values. 5 = email screenshots: the sender is the target
+ * (never the mail app), channel cataloged, sender read from OCR. 6 = a
+ * probe unrelated to the report's own domains is discarded. Bump when a change makes older reports wrong to resell; each
+ * older entry is then re-researched once on its next scan.
+ */
+const REPORT_STANDARD = 6;
+
+function meetsReportStandard(telemetry) {
+  return Number(telemetry?.reportStandard || 0) >= REPORT_STANDARD;
+}
+
+/**
  * Cache reuse requires the stronger current proof.
  *
  * Older telemetry containing only a query count is intentionally not
@@ -224,5 +292,8 @@ module.exports = {
   getProviderGroundedSources,
   getProviderGroundingSupports,
   buildGroundingVerification,
+  mergeGroundingVerifications,
   isTelemetryGrounded,
+  meetsReportStandard,
+  REPORT_STANDARD,
 };

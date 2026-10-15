@@ -62,6 +62,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun ConsumerCardTab(
     consumerCard: ConsumerCard?,
+    /** A Deep Dive already bought for this report: shown without a new charge. */
+    savedDeepDive: String? = null,
     onRequestDeepDive: (suspend () -> String?)? = null
 ) {
     if (consumerCard == null) {
@@ -78,7 +80,7 @@ fun ConsumerCardTab(
     }
 
     var isExpanded by remember { mutableStateOf(false) }
-    var deepDiveText by remember { mutableStateOf<String?>(null) }
+    var deepDiveText by remember(savedDeepDive) { mutableStateOf(savedDeepDive) }
     var isLoadingDeepDive by remember { mutableStateOf(false) }
     var deepDiveError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()

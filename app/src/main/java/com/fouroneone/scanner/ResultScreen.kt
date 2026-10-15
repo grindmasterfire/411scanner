@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.sp
 fun ResultScreen(
     report: ScanReport,
     onBackClick: () -> Unit,
+    savedDeepDive: String? = null,
     onRequestDeepDive: (suspend () -> String?)? = null
 ) {
     var selectedTabIndex by remember { mutableIntStateOf(0) }
@@ -123,6 +124,7 @@ fun ResultScreen(
             when (selectedTabIndex) {
                 0 -> ConsumerCardTab(
                     consumerCard = report.consumerCard,
+                    savedDeepDive = savedDeepDive,
                     onRequestDeepDive = onRequestDeepDive
                 )
 

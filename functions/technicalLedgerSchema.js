@@ -7,12 +7,9 @@
  * @security_gate Model-proposed evidence is not trusted by schema alone; technicalLedgerEvidence.js validates receipts against provider-grounded sources.
  * @owner_context 411 Scanner Technical 411 response contract.
  *
- * Evidence receipt status vocabulary:
- * - verified
- * - not_found
- * - not_applicable
- * - unresolved
- * - not_researched
+ * Evidence receipt status vocabulary (fire ruling 2026-10-15): verified,
+ * not_applicable, or a searched_* state naming why a field is empty.
+ * "unresolved" and "not_researched" are not allowed.
  *
  * Legacy Technical 411 text fields remain present for current Android
  * rendering while evidence receipts become the machine-readable authority.
@@ -33,7 +30,19 @@ const EVIDENCE_RECEIPT_SCHEMA = {
     },
 
     status: {
-      type: "string"
+      type: "string",
+      enum: [
+        "verified",
+        "not_applicable",
+        "searched_not_found",
+        "searched_redacted",
+        "searched_paywalled",
+        "searched_removed",
+        "searched_corrupted",
+        "searched_conflicting",
+        "searched_too_new",
+        "searched_beyond_scope"
+      ]
     },
 
     finding: {

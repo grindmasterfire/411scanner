@@ -10,6 +10,12 @@
 
 const admin = require("firebase-admin");
 
+/*
+ * 2 = 2026-10-15: SOURCES from Google Search grounding; pattern Deep Dive
+ * (how it works, history, what to do, support) when the actor is unnamed.
+ */
+const DEEP_DIVE_STANDARD = 2;
+
 /**
  * Stores a completed Deep Dive and its Gemini telemetry on the existing
  * scan_cache record rather than creating a separate cache identity.
@@ -57,6 +63,15 @@ async function getCachedDeepDive(db, cacheKey) {
       return null;
     }
 
+    // Dives made before the current standard (grounded SOURCES, pattern
+    // mode for unnamed actors) are regenerated, not resold.
+    if (
+      Number(cachedData.deepDiveTelemetry?.deepDiveStandard || 0) <
+      DEEP_DIVE_STANDARD
+    ) {
+      return null;
+    }
+
     return {
       text: cachedData.deepDive,
       telemetry: cachedData.deepDiveTelemetry || null
@@ -71,6 +86,7 @@ async function getCachedDeepDive(db, cacheKey) {
 }
 
 module.exports = {
+  DEEP_DIVE_STANDARD,
   setCachedDeepDive,
   getCachedDeepDive
 };

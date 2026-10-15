@@ -44,10 +44,33 @@ const {
   consumeDeepDive,
   grantEntitlement,
   grantTopUp,
-  linkFamilySeat,
   removeFamilySeat,
   restrictFamilySeat,
 } = require("./entitlementStore");
+
+const {
+  createFamilyInvite,
+  cancelFamilyInvite,
+  respondToFamilyInvite,
+  listGroupInvites,
+  listInvitesForEmail,
+  normalizeEmail,
+} = require("./familyInvites");
+
+/*
+ * Family invite errors carry a callable error code and a message written
+ * for the user; pass both through so the app can show it.
+ */
+async function asHttps(fn) {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e instanceof HttpsError) throw e;
+    if (e && e.code && typeof e.code === "string") throw new HttpsError(e.code, e.message);
+    console.error("[family] failed:", e && e.message);
+    throw new HttpsError("internal", "Something went wrong. Try again.");
+  }
+}
 
 const {
   getCachedDeepDive,
@@ -62,6 +85,13 @@ const {
 const {
   generateDeepDive,
 } = require("./deepDiveEngine");
+
+const {
+  isPatternTarget,
+  patternKeyFor,
+  readPatternFile,
+  filePattern,
+} = require("./patternFiles");
 
 const {
   estimateGeminiTokenCost,
@@ -222,15 +252,19 @@ exports.scan = onCall(
       // through as uid=null; only a present-but-invalid token is ignored.
       let uid = null;
       let isTester = false;
+      let email = "";
       try {
         const h = (request.rawRequest && request.rawRequest.headers && request.rawRequest.headers.authorization) || "";
         if (h.startsWith("Bearer ")) {
           const decoded = await admin.auth().verifyIdToken(h.slice(7));
           uid = decoded.uid;
           isTester = isTesterToken(decoded);
+          // The scanner's own address is the recipient in an email
+          // screenshot, never its sender.
+          email = decoded.email || "";
         }
       } catch (e) { uid = null; }
-      return executeScan(db, serverTimestamp, request.data || {}, uid, { isTester });
+      return executeScan(db, serverTimestamp, request.data || {}, uid, { isTester, email });
     })()
 );
 
@@ -357,11 +391,31 @@ exports.deepDive = onCall(
     }
 
     /*
-     * Deep Dive reasons only from the completed report supplied by
-     * the client. It does not conduct another independent scan.
+     * Deep Dive reasons from the completed report. The server's own copy
+     * (Cache Bank, by cacheKey) adds the identity and pattern the app's
+     * summary leaves out; an unnamed actor turns on the pattern Deep Dive,
+     * which starts from the Cache Bank's file on that pattern.
      */
-    const reportSummary =
-      originalReport || {};
+    let fullReport = null;
+    try {
+      const entry = await db.collection("scan_cache").doc(cacheKey).get();
+      fullReport = entry.exists ? (entry.data() || {}).report || null : null;
+    } catch (e) {
+      console.warn("[deepDive] full report read failed:", e.message);
+    }
+    const patternMode = Boolean(fullReport) && isPatternTarget(fullReport);
+    const patternKey = patternMode ? patternKeyFor(fullReport) : null;
+    const priorFile = patternKey ? await readPatternFile(db, patternKey) : null;
+
+    const reportSummary = {
+      ...(originalReport || {}),
+      ...(fullReport
+        ? {
+            solicitationIdentity: fullReport.solicitation_identity || null,
+            solicitationPattern: fullReport.solicitation_pattern || null,
+          }
+        : {}),
+    };
 
     const {
       text,
@@ -370,7 +424,8 @@ exports.deepDive = onCall(
       await generateDeepDive(
         apiKey,
         reportSummary,
-        targetName
+        targetName,
+        { patternMode, priorFile }
       ).catch(
         async (error) => {
           // The credit is already consumed; record the failure so the
@@ -404,6 +459,11 @@ exports.deepDive = onCall(
       text,
       telemetry
     );
+
+    // Start (or grow) the Cache Bank's file on this scam pattern.
+    if (patternKey) {
+      await filePattern(db, { patternKey, report: fullReport, text, cacheKey });
+    }
 
     // The phone gets the Deep Dive text only; telemetry stays in the
     // deepdive receipt for the Business Center.
@@ -608,17 +668,10 @@ exports.grantEntitlement = onCall(
  */
 exports.linkFamilySeat = onCall(
   { region: "us-central1", timeoutSeconds: 30, memory: "256MiB" },
-  async (request) => {
-    const uid = request.auth && request.auth.uid;
-    if (!uid) throw new HttpsError("unauthenticated", "Sign-in required.");
-    const data = request.data || {};
-    if (!data.seatUid) throw new HttpsError("invalid-argument", "seatUid required.");
-    const ent = await getEntitlement(db, uid);
-    if (!ent || !ent.familyGroupId) {
-      throw new HttpsError("failed-precondition", "No family group found for this user.");
-    }
-    const result = await linkFamilySeat(db, ent.familyGroupId, uid, data.seatUid);
-    return { linked: true, ...result };
+  async () => {
+    // Retired: linking by uid skipped the member's consent and overwrote
+    // their own plan. Members join only by accepting an invite.
+    throw new HttpsError("failed-precondition", "Use a Family invite instead.");
   }
 );
 
@@ -696,29 +749,77 @@ exports.inviteFamilySeat = onCall(
   async (request) => {
     const uid = request.auth && request.auth.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Sign-in required.");
-    const data = request.data || {};
-    const email = (data.email || "").trim().toLowerCase();
-    if (!email) throw new HttpsError("invalid-argument", "email required.");
+    const email = normalizeEmail((request.data || {}).email);
 
-    const ent = await getEntitlement(db, uid);
-    if (!ent || !ent.familyGroupId) {
-      throw new HttpsError("failed-precondition", "No family group found for this user.");
-    }
-
-    let seatUid;
+    // The invitee may not have an account yet; the invite waits for them.
+    let existingSeatUid = null;
     try {
-      const user = await admin.auth().getUserByEmail(email);
-      seatUid = user.uid;
-    } catch (e) {
-      throw new HttpsError("not-found", "No 411 Scanner account found for that email.");
-    }
+      existingSeatUid = (await admin.auth().getUserByEmail(email)).uid;
+    } catch (e) { /* no account yet */ }
 
-    if (seatUid === uid) {
-      throw new HttpsError("invalid-argument", "You can't invite yourself.");
-    }
+    return asHttps(() =>
+      createFamilyInvite(db, {
+        ownerUid: uid,
+        ownerEmail: request.auth.token.email || "",
+        email,
+        existingSeatUid,
+      })
+    );
+  }
+);
 
-    const result = await linkFamilySeat(db, ent.familyGroupId, uid, seatUid);
-    return { invited: true, email, ...result };
+/**
+ * Pending Family invites addressed to the caller's verified email.
+ */
+exports.getFamilyInvites = onCall(
+  { region: "us-central1", timeoutSeconds: 30, memory: "256MiB" },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign-in required.");
+    const token = request.auth.token || {};
+    if (!token.email || token.email_verified === false) return { invites: [] };
+    const invites = await listInvitesForEmail(db, token.email);
+    return {
+      invites: invites.map((i) => ({ inviteId: i.inviteId, ownerEmail: i.ownerEmail })),
+    };
+  }
+);
+
+/**
+ * Invitee accepts or declines a Family invite.
+ */
+exports.respondFamilyInvite = onCall(
+  { region: "us-central1", timeoutSeconds: 30, memory: "256MiB" },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign-in required.");
+    const token = request.auth.token || {};
+    if (!token.email || token.email_verified === false) {
+      throw new HttpsError("permission-denied", "A verified email is required.");
+    }
+    const data = request.data || {};
+    return asHttps(() =>
+      respondToFamilyInvite(db, {
+        inviteId: data.inviteId,
+        uid,
+        email: token.email,
+        accept: data.accept === true,
+      })
+    );
+  }
+);
+
+/**
+ * Owner cancels a pending invite.
+ */
+exports.cancelFamilyInvite = onCall(
+  { region: "us-central1", timeoutSeconds: 30, memory: "256MiB" },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) throw new HttpsError("unauthenticated", "Sign-in required.");
+    return asHttps(() =>
+      cancelFamilyInvite(db, { ownerUid: uid, email: (request.data || {}).email })
+    );
   }
 );
 
@@ -816,11 +917,16 @@ exports.getFamilyDetails = onCall(
       });
     }
 
+    const pendingInvites = isOwner
+      ? (await listGroupInvites(db, ent.familyGroupId)).map((i) => ({ email: i.email }))
+      : [];
+
     return {
       groupId: ent.familyGroupId,
       isOwner,
       maxSeats: 4,
       members,
+      pendingInvites,
     };
   }
 );

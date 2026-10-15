@@ -69,6 +69,7 @@ const {
 
 const {
   buildGroundingVerification,
+  mergeGroundingVerifications,
 } = require("./groundingVerification");
 
 const {
@@ -97,6 +98,10 @@ const {
 } = require("./scanCompositionMeter");
 
 const { probeContextBlock } = require("./networkProbe");
+
+const { stripDownloadLinks } = require("./downloadLinkGuard");
+
+const { REPORT_STANDARD } = require("./groundingVerification");
 
 const PASS1_MODEL =
   process.env.PASS1_MODEL || "gemini-3.1-pro-preview";
@@ -154,20 +159,6 @@ Do not rely only on model memory, the submitted image, historical evidence, or c
 If useful evidence is limited, perform the grounded search anyway and report the limitation honestly.
 `;
 
-const GROUNDING_RETRY_INSTRUCTION = `
-MANDATORY LIVE WEB VERIFICATION RETRY:
-
-The previous provider attempt did not produce sufficient provider-confirmed live grounding.
-
-You MUST invoke Google Search during this attempt and use the resulting grounded web evidence.
-
-Do not complete the report from model memory alone.
-
-Verify the material claims needed for this 411, including target identity, official destination, regulatory or registration claims when applicable, pricing/business-model facts, and other consequential evidence.
-
-If a fact cannot be established, mark it unresolved, not found, not applicable, or not researched as appropriate rather than assuming it.
-`;
-
 /*
  * Final-turn search directive. Sent as the LAST content part, after the
  * image, so it is the instruction nearest to generation (the long system
@@ -184,6 +175,126 @@ function buildFinalSearchDirective(attemptNumber) {
     "destination) and build the dossier from those live results, not from " +
     `training memory. [attempt ${nonce}]`
   );
+}
+
+/*
+ * Pass 1A: search-first. Gemini skipped Google Search on ~31% of scans
+ * (Oct 14-15, every one with zero queries across 5 attempts) when the
+ * search order sat behind the ~15k-token SYSTEM_PROMPT. This pass carries
+ * only a short instruction, the image, and the search directive, so search
+ * is the whole job. The grounding gate runs here; Pass 1B then writes the
+ * full dossier from these live findings.
+ */
+const SEARCH_PASS_SYSTEM_PROMPT =
+  "You are a live web researcher for a consumer-protection scanner. " +
+  "Identify the business, app, product, or offer promoted in the image, " +
+  "then use Google Search to find who operates it, its official website, " +
+  "and what reviews, complaints, regulators, and news say about it. " +
+  "Search before you answer. Report only what the search results say, " +
+  "naming the source of each fact. If the image is an email, research " +
+  "the sender (display name, address, and domain) and what the email " +
+  "asks for, never the email app or provider showing it.";
+
+function createSearchModel(genAI) {
+  return genAI.getGenerativeModel({
+    model: MODEL_NAME,
+    systemInstruction: SEARCH_PASS_SYSTEM_PROMPT,
+    tools: [{ googleSearch: {} }],
+    generationConfig: { temperature: 1.0, maxOutputTokens: 4096 },
+  });
+}
+
+function buildSearchPassPrompt(targetHint) {
+  return targetHint
+    ? `Research the target in this image. ${targetHint}`
+    : "Research the target in this image.";
+}
+
+/*
+ * Run Pass 1A (search-first, grounding gate, retried) then Pass 1B (full
+ * research prompt fed the live findings). Returns the dossier for Pass 2,
+ * the merged grounding of both passes, and per-attempt telemetry. Throws a
+ * groundingRejected error, carrying the attempts, when 1A never grounds.
+ */
+async function runSearchFirstResearch({
+  searchModel,
+  researchModel,
+  imagePart,
+  researchPrompt,
+  targetHint = "",
+  maxSearchAttempts = MAX_GROUNDING_RETRIES,
+  pause = (ms) => new Promise((r) => setTimeout(r, ms)),
+}) {
+  const attempts = [];
+
+  // Transient API errors get their own retry budget; they never burn a
+  // grounding attempt.
+  async function call(model, parts, passLabel) {
+    let lastError = null;
+    for (let apiAttempt = 0; apiAttempt < 3; apiAttempt++) {
+      try {
+        const result = await model.generateContent(parts);
+        attempts.push(buildAttemptTelemetry(result.response, attempts.length + 1, passLabel));
+        return result.response;
+      } catch (err) {
+        lastError = err;
+        if (!isTransientProviderError(err) || apiAttempt === 2) throw err;
+        await backoff(apiAttempt);
+      }
+    }
+    throw lastError;
+  }
+
+  const searchParts = () => [
+    buildSearchPassPrompt(targetHint),
+    imagePart,
+    buildFinalSearchDirective(attempts.length + 1),
+  ];
+
+  let searchResponse = await call(searchModel, searchParts(), "search");
+  while (
+    !attempts[attempts.length - 1].groundingVerification.verified &&
+    attempts.length < maxSearchAttempts
+  ) {
+    await pause(600 * attempts.length);
+    searchResponse = await call(searchModel, searchParts(), "search");
+  }
+
+  const searchVerification = attempts[attempts.length - 1].groundingVerification;
+  if (!searchVerification.verified) {
+    const error = new HttpsError(
+      "failed-precondition",
+      "411 could not establish live web grounding after the allowed retry. No diagnostic intelligence was accepted."
+    );
+    error.groundingRejected = true;
+    const q = Number(searchVerification.googleSearchQueryCount) || 0;
+    const c = Number(searchVerification.groundedSourceCount) || 0;
+    error.groundingCause = q === 0 ? "model_refused" : (c === 0 ? "blink" : "unknown");
+    error.researchAttempts = attempts;
+    throw error;
+  }
+
+  const searchFindings = searchResponse.text();
+
+  const researchResponse = await call(
+    researchModel,
+    [
+      `${researchPrompt}\n\nLIVE SEARCH FINDINGS (Google Search results gathered moments ago for this image):\n${searchFindings}\n\nBuild the dossier from these live findings. Run more Google searches for anything they do not cover.`,
+      imagePart,
+      buildFinalSearchDirective(attempts.length + 1),
+    ],
+    "research"
+  );
+
+  return {
+    // Pass 2 sees the live findings even if 1B leaves some out.
+    dossier: `${researchResponse.text()}\n\nLIVE SEARCH FINDINGS:\n${searchFindings}`,
+    verification: mergeGroundingVerifications([
+      searchVerification,
+      attempts[attempts.length - 1].groundingVerification,
+    ]),
+    attempts,
+  };
 }
 
 /**
@@ -573,6 +684,12 @@ async function analyzeImageWithGemini(
     });
 
   /*
+   * PASS 1A MODEL — search-first: short instruction, Google Search only.
+   */
+  const searchModel =
+    createSearchModel(genAI);
+
+  /*
    * ================================================================
    * PASS 2 MODEL — Structured JSON synthesis from Pass 1 dossier.
    * No search tools attached; operates entirely on grounded evidence
@@ -675,113 +792,42 @@ Do not generate Deep Dive.`;
 
   /*
    * ================================================================
-   * PASS 1 — Grounded research with retry.
-   * Grounding gate enforced here: if both attempts fail verification,
-   * the request is rejected before Pass 2 fires.
+   * PASS 1 — Search-first (1A, grounding gate, retried), then the full
+   * research dossier (1B). If 1A never grounds, the request is rejected
+   * before Pass 2 fires.
    * ================================================================
    */
-  const researchAttempts = [];
+  const targetHint =
+    linkEvidence && Array.isArray(linkEvidence.links)
+      ? [...new Set(linkEvidence.links.map((l) => l.finalDomain).filter(Boolean))]
+          .slice(0, 3)
+          .map((d) => `Destination seen in its link: ${d}.`)
+          .join(" ")
+      : "";
 
-  async function runResearchAttempt(
-    requestPrompt,
-    attemptNumber
-  ) {
-    /*
-     * Transient API errors get their own retry budget with backoff.
-     * A 503 on attempt 1 must not burn a grounding-verification retry
-     * or kill the scan — the research hasn't happened yet.
-     */
-    let lastError = null;
-    for (let apiAttempt = 0; apiAttempt < 3; apiAttempt++) {
-      try {
-        const result =
-          await researchModel.generateContent([
-            requestPrompt,
-            imagePart,
-            buildFinalSearchDirective(attemptNumber),
-          ]);
-
-        const telemetry =
-          buildAttemptTelemetry(
-            result.response,
-            attemptNumber,
-            "research"
-          );
-
-        researchAttempts.push(
-          telemetry
-        );
-
-        return result.response;
-      } catch (err) {
-        lastError = err;
-        if (!isTransientProviderError(err) || apiAttempt === 2) throw err;
-        await backoff(apiAttempt);
-      }
-    }
-    throw lastError;
-  }
-
-  let researchResponse =
-    await runResearchAttempt(
-      promptToExecute,
-      1
-    );
-
-  while (
-    !researchAttempts[researchAttempts.length - 1]
-      .groundingVerification
-      .verified &&
-    researchAttempts.length < MAX_GROUNDING_RETRIES
-  ) {
-    await new Promise((r) => setTimeout(r, 600 * researchAttempts.length));
-    researchResponse =
-      await runResearchAttempt(
-        `${promptToExecute}\n${GROUNDING_RETRY_INSTRUCTION}`,
-        researchAttempts.length + 1
-      );
-  }
-
-  const pass1FinalVerification =
-    researchAttempts[
-      researchAttempts.length - 1
-    ].groundingVerification;
-
-  /*
-   * Both attempts may consume provider resources.
-   * If grounding still fails, reject before Pass 2, parsing, scoring,
-   * persistence, solicitation history, or Cache Bank admission.
-   */
-  if (
-    !pass1FinalVerification
-      .verified
-  ) {
-    const error =
-      new HttpsError(
-        "failed-precondition",
-        "411 could not establish live web grounding after the allowed retry. No diagnostic intelligence was accepted."
-      );
-
-    error.groundingRejected =
-      true;
-
-    const finalV = pass1FinalVerification || {};
-    const q = Number(finalV.webSearchQueries) || 0;
-    const c = Number(finalV.groundingChunks) || 0;
-    error.groundingCause =
-      q === 0 ? "model_refused" : (c === 0 ? "blink" : "unknown");
-
-    error.scanTelemetry =
-      aggregateTelemetry(
-        researchAttempts,
+  let research;
+  try {
+    research = await runSearchFirstResearch({
+      searchModel,
+      researchModel,
+      imagePart,
+      researchPrompt: promptToExecute,
+      targetHint,
+    });
+  } catch (error) {
+    if (error.groundingRejected) {
+      error.scanTelemetry = aggregateTelemetry(
+        error.researchAttempts,
         historicalEvidencePacket
       );
-
+      delete error.researchAttempts;
+    }
     throw error;
   }
 
-  const researchDossier =
-    researchResponse.text();
+  const researchAttempts = research.attempts;
+  const pass1FinalVerification = research.verification;
+  const researchDossier = research.dossier;
 
   /*
    * ================================================================
@@ -799,13 +845,13 @@ ${researchDossier}
 Instructions:
 - Use the research dossier as your primary evidence source for all claims.
 - Do not invent or hallucinate facts not present in the dossier or visible in the image.
-- If a fact was not established in the dossier, mark the field as not researched, not found, or not applicable as appropriate.
+- If a fact was not established in the dossier, use the searched_* state that says why (not found in named sources, redacted, paywalled, removed, corrupted, conflicting, too new, beyond scope) with one specific sentence naming where it was looked for. Never "unresolved" or "not researched".
 - Complete all JSON fields according to the response schema.
 - Derive all six risk vectors from the evidence in the dossier.
 - Identify applicable Action Meter context signals and confirmed Floor Raisers.
 - Populate alternatives.discovery_items using only real alternatives found in the research dossier. Each entry needs a real name, a real destination_url from the dossier, a relationship type (comparative, complementary, or adjacent), and a one-line description. For high-risk targets (Action Meter 8.0+), prioritize safer alternatives when they appear in the dossier. If the dossier contains no alternatives, return an empty discovery_items array rather than inventing entries.
-- EVIDENCE-INTEGRITY BINDING (MANDATORY): The consumer_card narrative and every metric annotation may only assert what the evidence_receipts and floor_raiser_evidence actually support. Before writing any specific harm claim (malware, wallet drainer, theft, MLM, criminal operation, recruitment scheme, or similar), confirm a corresponding evidence_receipt exists at status "verified", or grounded floor_raiser_evidence supports it. If the supporting receipt is "unresolved", "not_found", "not_researched", or "not_applicable", the narrative must NOT state the harm as established fact. Downgrade to hedged, evidence-accurate language (for example "could not be verified", "shows the pattern of", "unconfirmed") instead of dropping the finding.
-- OPERATOR CONSISTENCY: If the narrative names a specific operator, developer, or entity as responsible, the attribution.operator_name evidence receipt must be "verified". If that receipt is "unresolved" or "not_found", do not name the entity as the confirmed actor in the consumer narrative. Describe the solicitation pattern instead, consistent with the receipt state.
+- EVIDENCE-INTEGRITY BINDING (MANDATORY): The consumer_card narrative and every metric annotation may only assert what the evidence_receipts and floor_raiser_evidence actually support. Before writing any specific harm claim (malware, wallet drainer, theft, MLM, criminal operation, recruitment scheme, or similar), confirm a corresponding evidence_receipt exists at status "verified", or grounded floor_raiser_evidence supports it. If the supporting receipt is not "verified", the narrative must NOT state the harm as established fact. Downgrade to hedged, evidence-accurate language (for example "could not be verified", "shows the pattern of", "unconfirmed") instead of dropping the finding.
+- OPERATOR CONSISTENCY: If the narrative names a specific operator, developer, or entity as responsible, the attribution.operator_name evidence receipt must be "verified". If that receipt is not "verified", do not name the entity as the confirmed actor in the consumer narrative. Describe the solicitation pattern instead, consistent with the receipt state.
 - No claim in the consumer narrative may be stronger than its matching Technical 411 evidence state. The receipt is the ceiling for the claim.
 - For solicitation recognition, describe the solicitation pattern independently of confirmed actor identity.`;
 
@@ -868,6 +914,9 @@ Instructions:
   telemetry.groundingVerification =
     pass1FinalVerification;
 
+  // Cache Bank only resells reports made under the current rules.
+  telemetry.reportStandard = REPORT_STANDARD;
+
   /*
    * ================================================================
    * REPORT PARSING & EVIDENCE NORMALIZATION
@@ -915,6 +964,9 @@ Instructions:
     enforceTechnicalEvidencePrecision(parsedData);
     enforceRegulatoryEvidencePrecision(parsedData.technical_ledger);
   }
+
+  // Links open web pages, never files (10/14 APK download).
+  stripDownloadLinks(parsedData);
 
   const floorRaisers =
     extractFloorRaisers(
@@ -985,5 +1037,7 @@ Instructions:
 
 module.exports = {
   analyzeImageWithGemini,
+  runSearchFirstResearch,
+  createSearchModel,
   isTransientProviderError,
 };

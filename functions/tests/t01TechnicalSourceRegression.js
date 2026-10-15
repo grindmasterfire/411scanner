@@ -114,7 +114,9 @@ enforceTechnicalFactPrecision(
 
 assert.equal(
   blocked.technical_ledger.evidence_receipts[0].status,
-  "unresolved"
+  // fire ruling 2026-10-15: a claim no live source confirmed is shown as
+  // unconfirmed, never "unresolved".
+  "searched_unconfirmed"
 );
 
 // Restoration: the source URL is preserved (not wiped) when downgraded.

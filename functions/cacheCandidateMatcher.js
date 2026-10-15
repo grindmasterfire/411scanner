@@ -27,6 +27,7 @@ const {
 
 const {
   isTelemetryGrounded,
+  meetsReportStandard,
 } = require("./groundingVerification");
 
 const {
@@ -164,6 +165,20 @@ function assessCacheCandidate(
       reusable: false,
       reason:
         "candidate_not_grounded",
+      ...signals,
+    };
+  }
+
+  // Made under older rules (e.g. "unresolved" receipts): re-research.
+  if (
+    !meetsReportStandard(
+      candidate.telemetry
+    )
+  ) {
+    return {
+      reusable: false,
+      reason:
+        "candidate_old_standard",
       ...signals,
     };
   }

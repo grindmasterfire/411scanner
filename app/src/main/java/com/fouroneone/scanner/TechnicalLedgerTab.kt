@@ -429,12 +429,7 @@ fun TechnicalLedgerTab(
 
                 OutlinedButton(
                     onClick = {
-                        context.startActivity(
-                            Intent(
-                                Intent.ACTION_VIEW,
-                                Uri.parse(reportUrl)
-                            )
-                        )
+                        SafeLinks.openWebPage(context, reportUrl)
                     },
                     modifier = Modifier
                         .weight(1f)
@@ -478,17 +473,48 @@ private fun String.evidenceStateLabel():
         "" ->
             "Not established"
 
+        // Codes from reports cached before 2026-10-15.
         "unresolved" ->
-            "Unresolved"
+            "Found, not confirmed"
 
         "not_found" ->
-            "Not found"
+            "Searched, no record"
 
         "not_researched" ->
-            "Not researched"
+            "No record established"
 
         "not_applicable" ->
             "Not applicable"
+
+        "searched_not_found" ->
+            "Searched, no record"
+
+        "searched_redacted" ->
+            "Searched, redacted"
+
+        "searched_paywalled" ->
+            "Searched, behind paywall"
+
+        "searched_removed" ->
+            "Searched, deleted"
+
+        "searched_corrupted" ->
+            "Searched, record corrupted"
+
+        "searched_conflicting" ->
+            "Searched, sources conflict"
+
+        "searched_too_new" ->
+            "Searched, too new"
+
+        "searched_beyond_scope" ->
+            "Searched, needs official request"
+
+        "searched_blocked" ->
+            "Searched, site blocked us"
+
+        "searched_unconfirmed" ->
+            "Found, not confirmed"
 
         else ->
             this

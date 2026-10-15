@@ -33,34 +33,24 @@ const market = enforce(
     {
       field:
         "regulatory_record.license_status",
-      status: "unresolved",
+      // As normalized upstream: a claim no live source confirmed.
+      status: "searched_unconfirmed",
       finding:
-        "Mode Mobile conducts offerings under SEC exemptions.",
+        "Reported, but not confirmed by a source you can open: Mode Mobile conducts offerings under SEC exemptions.",
       source_url: "",
     },
   ]
 );
 
+// fire ruling 2026-10-15: the client sees why, never a bare state code.
 assert.equal(
   market.license_status,
-  "unresolved"
+  "Reported, but not confirmed by a source you can open: Mode Mobile conducts offerings under SEC exemptions."
 );
-assert.equal(
-  market.bbb_record,
-  "not_researched"
-);
-assert.equal(
-  market.ftc_record,
-  "not_researched"
-);
-assert.equal(
-  market.complaint_pattern,
-  "not_researched"
-);
-assert.equal(
-  market.review_spread,
-  "not_researched"
-);
+// Narrative with no receipt behind it is dropped, not shown as fact.
+for (const field of ["bbb_record", "ftc_record", "complaint_pattern", "review_spread"]) {
+  assert.equal(market[field], "");
+}
 
 const verified = enforce(
   {
@@ -84,8 +74,8 @@ const verified = enforce(
     {
       field:
         "regulatory_record.bbb_record",
-      status: "not_found",
-      finding: "",
+      status: "searched_not_found",
+      finding: "Searched the BBB directory: no business profile exists.",
       source_url: "",
     },
     {
@@ -104,7 +94,7 @@ assert.equal(
 );
 assert.equal(
   verified.bbb_record,
-  "not_found"
+  "Searched the BBB directory: no business profile exists."
 );
 assert.equal(
   verified.ftc_record,
@@ -134,7 +124,7 @@ const unsupportedVerified = enforce(
 
 assert.equal(
   unsupportedVerified.license_status,
-  "unresolved"
+  "Reported, but not confirmed by a source you can open: License claimed by provider"
 );
 
 console.log(

@@ -6,7 +6,7 @@
  * @security_gate A model claim cannot become verified merely because Gemini wrote a URL or confident sentence.
  * @owner_context 411 Scanner Technical 411 evidence authority.
  *
- * Canonical receipt states: verified, not_found, not_applicable, unresolved, not_researched.
+ * Receipt states: verified, not_applicable, or a searched_* state that says why a field is empty (see REPORTABLE_STATUSES).
  *
  * Provider grounding metadata returns opaque vertexaisearch redirect URLs.
  * Those are resolved to real destinations so (a) receipts can match the domains
@@ -21,16 +21,48 @@ const {
   bindTechnicalEvidenceSources,
 } = require("./groundingEvidenceBinding");
 
-const VALID_STATUSES = new Set([
+/*
+ * fire ruling 2026-10-15: we sell OSINT. A field we couldn't fill must tell
+ * the client exactly why (paywall, deleted, redacted, ...) in a sentence
+ * naming where we looked. "Unresolved" and "not researched" never ship.
+ */
+const REPORTABLE_STATUSES = new Set([
   "verified",
-  "not_found",
   "not_applicable",
-  "unresolved", // DEPRECATED 2026-10-14 — map to honest states below, do not emit
-  "not_researched", // DEPRECATED 2026-10-14 — map to honest states below, do not emit
   "searched_not_found",
   "searched_redacted",
+  "searched_paywalled",
+  "searched_removed",
+  "searched_corrupted",
+  "searched_conflicting",
+  "searched_too_new",
   "searched_beyond_scope",
+  "searched_blocked", // server-only: the target's bot protection blocked our probe
+  "searched_unconfirmed", // server-only: a claim no live source confirmed
 ]);
+
+// Legacy and model-error states, mapped to the honest state they mean.
+const LEGACY_STATUS_MAP = {
+  not_found: "searched_not_found",
+  not_researched: "searched_not_found",
+  unresolved: "searched_conflicting",
+};
+
+const FIELD_LABELS = {
+  "attribution.operator_name": "who operates it",
+  "attribution.official_domain": "its official website",
+  "attribution.business_addresses": "its business address",
+  "domain_registration.registrar": "the domain registrar",
+  "domain_registration.registrant": "who registered the domain",
+  "infrastructure.origin_host": "the hosting provider",
+  "infrastructure.host_cdn": "the content delivery network",
+  "regulatory_record.license_status": "licenses or registrations",
+  "regulatory_record.bbb_record": "a Better Business Bureau record",
+  "regulatory_record.ftc_record": "FTC enforcement records",
+  "regulatory_record.complaint_pattern": "consumer complaints",
+  "regulatory_record.review_spread": "customer reviews",
+  "commercial_terms.withdrawal_gate": "withdrawal or cash-out terms",
+};
 
 const GROUNDING_REDIRECT_HOST = "vertexaisearch.cloud.google.com";
 const GROUNDING_REDIRECT_PATH = "/grounding-api-redirect/";
@@ -245,42 +277,57 @@ function isSecRegistrationClaim(receipt) {
   );
 }
 
+function fieldLabel(field) {
+  const f = clean(field);
+  if (FIELD_LABELS[f]) return FIELD_LABELS[f];
+  const leaf = f.split(".").pop() || "this record";
+  return leaf.replace(/_/g, " ");
+}
+
+// Model sentences that say nothing about why; they get the reason template.
+const GENERIC_FINDING =
+  /^(not researched|not found|unresolved|unknown|n\/a|none|no data|not available|could not be (verified|determined|established))\b|could not be verified via live grounding|^we searched and this record wasn't found:/i;
+
+function reasonTemplate(status, field) {
+  const what = fieldLabel(field);
+  switch (status) {
+    case "searched_not_found": return `We searched public records for ${what} and found none.`;
+    case "searched_redacted": return `We found the record for ${what}, but it is privacy-protected or redacted.`;
+    case "searched_paywalled": return `The record for ${what} exists but sits behind a paywall or login we can't open.`;
+    case "searched_removed": return `A record for ${what} existed but has been deleted or taken down.`;
+    case "searched_corrupted": return `We found a record for ${what}, but it is broken or unreadable.`;
+    case "searched_conflicting": return `Sources disagree about ${what}, and none settles it.`;
+    case "searched_too_new": return `This target is too new to have a public record for ${what} yet.`;
+    case "searched_beyond_scope": return `The record for ${what} exists but requires an official request or offline access.`;
+    case "searched_blocked": return `The site blocked our scanner from reading ${what}.`;
+    case "searched_unconfirmed": return `We found a report about ${what}, but no live source confirms it.`;
+    default: return "";
+  }
+}
+
 /**
- * A non-verified receipt must never read as an established fact.
- * DEPRECATED 2026-10-14 (fire ruling: "we don't sell unresolved"): the states
- * "unresolved" and "not_researched" must never reach the user. Map them to honest,
- * specific language. New receipts must use searched_not_found, searched_redacted,
- * or searched_beyond_scope.
+ * Every non-verified receipt explains why, specifically. Keep the model's
+ * own sentence when it says something (where it looked, what happened);
+ * replace only empty or generic text. An unconfirmed claim is shown, but
+ * marked as unconfirmed so it never reads as fact.
  */
-function conformFindingToStatus(status, finding, field) {
+function explainFinding(status, finding, field) {
   const f = clean(finding);
-  if (!f) return f;
-  const lower = f.toLowerCase();
-  const fieldLabel = clean(field) || "This field";
-  // Honest states (2026-10-14): specific, user-facing language.
-  if (status === "searched_not_found") {
-    return `We searched and this record wasn't found: ${fieldLabel}.`;
+  if (status === "searched_unconfirmed") {
+    const claim = f.replace(/^unresolved reports?:\s*/i, "");
+    return claim && !GENERIC_FINDING.test(claim)
+      ? `Reported, but not confirmed by a source you can open: ${claim}`
+      : reasonTemplate(status, field);
   }
-  if (status === "searched_redacted") {
-    return `We searched but the record was redacted or privacy-protected: ${fieldLabel}.`;
-  }
-  if (status === "searched_beyond_scope") {
-    return `We searched and the information exists but is beyond what this scan can reach: ${fieldLabel}.`;
-  }
-  // DEPRECATED: map old ambiguous states to honest language.
-  if (status === "unresolved") {
-    return `We searched and this record wasn't found: ${fieldLabel}.`;
-  }
-  if (status === "not_researched") {
-    return `We searched and this record wasn't found: ${fieldLabel}.`;
-  }
+  if (!f || GENERIC_FINDING.test(f)) return reasonTemplate(status, field);
   return f;
 }
 
 function normalizeEvidenceReceipt(receipt, groundedSourceMap) {
-  const requestedStatus = VALID_STATUSES.has(clean(receipt?.status))
-    ? clean(receipt.status)
-    : "unresolved";
+  const rawStatus = clean(receipt?.status).toLowerCase();
+  const requestedStatus = REPORTABLE_STATUSES.has(rawStatus)
+    ? rawStatus
+    : LEGACY_STATUS_MAP[rawStatus] || "searched_not_found";
   const sourceUrl = normalizeUrl(receipt?.source_url);
   const groundedSource = findGroundedSource(sourceUrl, groundedSourceMap);
 
@@ -299,7 +346,7 @@ function normalizeEvidenceReceipt(receipt, groundedSourceMap) {
   // are authoritative by nature and never have grounded source URLs.
   const isProbeReceipt = (normalized.authority || "").toLowerCase().includes("network probe");
   if (normalized.status === "verified" && !groundedSource && !isProbeReceipt) {
-    normalized.status = "unresolved";
+    normalized.status = "searched_unconfirmed";
     // Preserve the original receipt URL — do not wipe the evidence trail.
     // The client filters unusable URLs from Inspect Source destinations.
     const originalUrl = normalizeUrl(receipt?.source_url);
@@ -320,7 +367,7 @@ function normalizeEvidenceReceipt(receipt, groundedSourceMap) {
     !isProbeReceipt &&
     (!normalized.source_url || isGroundingRedirect(normalized.source_url))
   ) {
-    normalized.status = "unresolved";
+    normalized.status = "searched_unconfirmed";
     // Preserve the original receipt URL if usable; do not wipe the trail.
     const originalUrl = normalizeUrl(receipt?.source_url);
     if (originalUrl && isUsableGroundedSourceUrl(originalUrl)) {
@@ -336,20 +383,16 @@ function normalizeEvidenceReceipt(receipt, groundedSourceMap) {
     isSecRegistrationClaim(normalized) &&
     (!isSecAuthority(normalized) || !normalized.subject || !normalized.identifier)
   ) {
-    normalized.status = "unresolved";
+    normalized.status = "searched_unconfirmed";
   }
 
   if (normalized.finding.toLowerCase().includes("sec certified")) {
-    normalized.status = "unresolved";
+    normalized.status = "searched_unconfirmed";
     normalized.finding = normalized.finding.replace(/sec certified/gi, "SEC registration not established");
   }
 
-  if (
-    normalized.status !== "verified" &&
-    normalized.status !== "not_applicable" &&
-    normalized.status !== "not_found"
-  ) {
-    normalized.finding = conformFindingToStatus(normalized.status, normalized.finding, normalized.field);
+  if (normalized.status !== "verified" && normalized.status !== "not_applicable") {
+    normalized.finding = explainFinding(normalized.status, normalized.finding, normalized.field);
   }
 
   // Final fallback: if source_url is still empty but Gemini proposed a valid
@@ -409,4 +452,5 @@ async function normalizeTechnicalEvidence(report, groundingInput = []) {
 module.exports = {
   normalizeEvidenceReceipt,
   normalizeTechnicalEvidence,
+  resolveGroundedSources,
 };

@@ -65,6 +65,9 @@ fun ScannerMainScreen(
         initialValue = QuotaStatus(0, 3, false, 0L, 3, false)
     )
 
+    // Family plan invites addressed to this account: accept or decline.
+    FamilyInvitePrompt()
+
     var showPaywall by remember { mutableStateOf(false) }
     var showAuthDialog by remember { mutableStateOf(false) }
     var showDocsSheet by remember { mutableStateOf(false) }
@@ -244,6 +247,24 @@ fun ScannerMainScreen(
      * Ad gate, then the background scan. Kept as one function so the
      * notification-permission prompt can run first and then continue.
      */
+    // Authorized scan waiting on "spend a credit on this?" (fire ruling 2026-10-15).
+    var pendingConfirmation by remember { mutableStateOf<Triple<String, String, AdProof>?>(null) }
+
+    pendingConfirmation?.let { (image, ocr, proof) ->
+        ScanConfirmDialog(
+            quotaStatus = quotaStatus,
+            onScan = {
+                pendingConfirmation = null
+                AppLog.event("gate") { "confirmed" }
+                executeAuthorizedScan(image, ocr, proof)
+            },
+            onCancel = {
+                pendingConfirmation = null
+                AppLog.event("gate") { "cancelled before charge" }
+            }
+        )
+    }
+
     fun authorizeAndScan(base64Image: String, currentOcrText: String) {
         coroutineScope.launch {
             ScanAccessCoordinator
@@ -252,11 +273,8 @@ fun ScannerMainScreen(
                     quotaStatus = quotaStatus,
                     onAuthorized = { adProof ->
                         AppLog.event("gate") { "authorized proof=${adProof.javaClass.simpleName}" }
-                        executeAuthorizedScan(
-                            base64Image,
-                            currentOcrText,
-                            adProof
-                        )
+                        // Nothing is sent (or charged) until the user confirms.
+                        pendingConfirmation = Triple(base64Image, currentOcrText, adProof)
                     },
                     onPaywallRequired = {
                         AppLog.event("gate") { "paywall_required" }
@@ -307,15 +325,22 @@ fun ScannerMainScreen(
             }
 
         if (parsedReport != null) {
+            var savedDeepDive by remember(parsedReport.cacheKey) {
+                mutableStateOf(DeepDiveStore.load(context, parsedReport.cacheKey))
+            }
             ResultScreen(
                 report = parsedReport,
                 onBackClick = {
                     scanResult = null
                     refreshRecentScans()
                 },
+                savedDeepDive = savedDeepDive,
                 onRequestDeepDive = {
                     try {
-                        ScanRepository.deepDive(parsedReport)
+                        ScanRepository.deepDive(parsedReport)?.also {
+                            DeepDiveStore.save(context, parsedReport.cacheKey, it)
+                            savedDeepDive = it
+                        }
                     } finally {
                         // A Deep Dive spends a top-up credit: re-read the bank.
                         QuotaManager.refreshServerQuota()
