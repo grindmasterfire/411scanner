@@ -17,6 +17,7 @@ const {
 } = require("./groundingVerification");
 const { resolveGroundedSources } = require("./technicalLedgerEvidence");
 const { DEEP_DIVE_STANDARD } = require("./deepDiveCacheLayer");
+const { traceCall } = require("./incidentTrace");
 
 /*
  * Narrow Deep Dive contract. Deliberately separate from the base scan
@@ -192,6 +193,7 @@ async function generateDeepDive(
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const usage = {};
+  const trace = [];
 
   // 1. Search-first: short prompt, retried until it actually searches.
   const searchModel = genAI.getGenerativeModel({
@@ -203,7 +205,9 @@ async function generateDeepDive(
   const request = searchRequest(originalReport || {}, targetName, patternMode);
   let searchResponse = null;
   for (let attempt = 1; attempt <= MAX_SEARCH_ATTEMPTS; attempt++) {
-    const r = await searchModel.generateContent([request, searchDirective(attempt)]);
+    const searchParts = [request, searchDirective(attempt)];
+    const r = await searchModel.generateContent(searchParts);
+    traceCall(trace, { model: searchModel, pass: "deep_dive_search", parts: searchParts, response: r.response });
     addUsage(usage, r.response);
     searchResponse = r.response;
     if (buildGroundingVerification(r.response).verified) break;
@@ -236,6 +240,7 @@ Base report (context only; do not restate any of it):
 ${JSON.stringify(originalReport)}${priorBlock}${findingsBlock}`;
 
   const result = await model.generateContent(prompt);
+  traceCall(trace, { model, pass: patternMode ? "deep_dive_pattern" : "deep_dive", parts: [prompt], response: result.response });
   addUsage(usage, result.response);
 
   const telemetry = {
@@ -264,7 +269,8 @@ ${JSON.stringify(originalReport)}${priorBlock}${findingsBlock}`;
 
   return {
     text: withGroundedSources(result.response.text(), groundedSources),
-    telemetry
+    telemetry,
+    trace
   };
 }
 

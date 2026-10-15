@@ -86,6 +86,7 @@ const AD_GATE_ENFORCED = process.env.AD_GATE_ENFORCED === "true";
 
 // App-store listing hosts: valid scan targets, but never probe targets.
 const { extractEmailSender } = require("./emailSender");
+const { writeIncident } = require("./incidentLedger");
 
 /*
  * Email solicitations: catalog the sender with the solicitation and give
@@ -238,6 +239,26 @@ async function executeScan(
       quality: scanFacts.quality,
       infrastructure: scanFacts.infrastructure,
       ...outcome,
+    });
+
+  // Incident Ledger: every model call this scan makes, as sent and received.
+  let incidentTrace = [];
+  const writeScanIncident = ({ report = null, failure = null }) =>
+    writeIncident(db, {
+      requestId,
+      uid,
+      cacheKey: data.imageBase64 ? buildCacheKey(data.imageBase64) : null,
+      imageBase64: data.imageBase64 || null,
+      mimeType: data.mimeType || "image/jpeg",
+      ocrText: data.ocrText || "",
+      report,
+      trace: incidentTrace,
+      failure,
+      facts: {
+        tier: scanFacts.tier || null,
+        charged: scanFacts.charged,
+        chargedVia: scanFacts.chargedVia,
+      },
     });
 
   let __result;
@@ -547,7 +568,9 @@ async function executeScan(
         linkEvidence,
         probe
       );
+    incidentTrace = result.trace || [];
   } catch (error) {
+    incidentTrace = error.trace || [];
     if (
       error?.groundingRejected &&
       error?.scanTelemetry
@@ -791,6 +814,7 @@ async function executeScan(
       ...failure,
     });
     await recordCompletion({ ok: false, code5: failure.code5 });
+    await writeScanIncident({ failure });
     throw error;
   }
 
@@ -808,6 +832,8 @@ async function executeScan(
   const delivered = clientView(__result);
   await storeScanOutcome(db, serverTimestamp, requestId, uid, delivered);
   await recordCompletion({ ok: true, code5: null });
+  // Full report (not the client view): the ledger keeps everything.
+  await writeScanIncident({ report: __result.report || null });
 
   return delivered;
 }

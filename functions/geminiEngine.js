@@ -101,6 +101,8 @@ const { probeContextBlock } = require("./networkProbe");
 
 const { stripDownloadLinks } = require("./downloadLinkGuard");
 
+const { traceCall } = require("./incidentTrace");
+
 const { fillLedgerDisplays } = require("./ledgerDisplayFill");
 
 const { REPORT_STANDARD } = require("./groundingVerification");
@@ -226,6 +228,7 @@ async function runSearchFirstResearch({
   targetHint = "",
   maxSearchAttempts = MAX_GROUNDING_RETRIES,
   pause = (ms) => new Promise((r) => setTimeout(r, ms)),
+  trace = null,
 }) {
   const attempts = [];
 
@@ -236,6 +239,7 @@ async function runSearchFirstResearch({
     for (let apiAttempt = 0; apiAttempt < 3; apiAttempt++) {
       try {
         const result = await model.generateContent(parts);
+        traceCall(trace, { model, pass: passLabel, parts, response: result.response });
         attempts.push(buildAttemptTelemetry(result.response, attempts.length + 1, passLabel));
         return result.response;
       } catch (err) {
@@ -807,9 +811,12 @@ Do not generate Deep Dive.`;
           .join(" ")
       : "";
 
+  // Incident Ledger: every call as sent and received.
+  const trace = [];
   let research;
   try {
     research = await runSearchFirstResearch({
+      trace,
       searchModel,
       researchModel,
       imagePart,
@@ -817,6 +824,7 @@ Do not generate Deep Dive.`;
       targetHint,
     });
   } catch (error) {
+    error.trace = trace;
     if (error.groundingRejected) {
       error.scanTelemetry = aggregateTelemetry(
         error.researchAttempts,
@@ -869,13 +877,15 @@ Instructions:
   for (let synAttempt = 0; synAttempt < 3 && !synthesisResponse; synAttempt++) {
     if (synAttempt > 0) await backoff(synAttempt - 1);
     try {
+      const synthesisParts = [
+        synAttempt === 0
+          ? synthesisPrompt
+          : `${synthesisPrompt}\n\nCRITICAL: return ONLY valid JSON. No prose, no markdown fences, no commentary.`,
+        imagePart,
+      ];
       const synthesisResult =
-        await synthesisModel.generateContent([
-          synAttempt === 0
-            ? synthesisPrompt
-            : `${synthesisPrompt}\n\nCRITICAL: return ONLY valid JSON. No prose, no markdown fences, no commentary.`,
-          imagePart,
-        ]);
+        await synthesisModel.generateContent(synthesisParts);
+      traceCall(trace, { model: synthesisModel, pass: "synthesis", parts: synthesisParts, response: synthesisResult.response });
       // Validate the JSON now: a malformed response is a retryable
       // failure, not a scan-killer. The dossier still exists.
       safeParseGeminiJson(synthesisResult.response.text());
@@ -1036,6 +1046,8 @@ Instructions:
     telemetry,
 
     composition,
+
+    trace,
   };
 }
 

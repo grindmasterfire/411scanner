@@ -86,6 +86,8 @@ const {
   generateDeepDive,
 } = require("./deepDiveEngine");
 
+const { writeIncident } = require("./incidentLedger");
+
 const {
   isPatternTarget,
   patternKeyFor,
@@ -420,6 +422,7 @@ exports.deepDive = onCall(
     const {
       text,
       telemetry,
+      trace,
     } =
       await generateDeepDive(
         apiKey,
@@ -459,6 +462,17 @@ exports.deepDive = onCall(
       text,
       telemetry
     );
+
+    // Incident Ledger: the Deep Dive, linked to its scan's specimen by cacheKey.
+    await writeIncident(db, {
+      kind: "deep_dive",
+      requestId,
+      uid,
+      cacheKey,
+      report: { deepDive: text, patternMode, patternKey, telemetry },
+      trace,
+      facts: { charged: true, chargedVia: "top_up" },
+    });
 
     // Start (or grow) the Cache Bank's file on this scam pattern.
     if (patternKey) {
