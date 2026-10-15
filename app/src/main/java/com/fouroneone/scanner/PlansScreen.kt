@@ -66,17 +66,7 @@ fun PlansScreen(
         val activity = context as? Activity
         if (activity != null) {
             BillingManager.launchPurchase(activity, productId) {
-                coroutineScope.launch {
-                    // Fallback: subscriptions get a time pass, top-ups a day.
-                    val hours = if (isTopUp) 24 else when (productId) {
-                        BillingManager.PRODUCT_STANDARD_WEEKLY -> 24 * 7
-                        BillingManager.PRODUCT_STANDARD_MONTHLY,
-                        BillingManager.PRODUCT_PRO_MONTHLY,
-                        BillingManager.PRODUCT_FAMILY_MONTHLY -> 24 * 30
-                        else -> 24 * 365
-                    }
-                    QuotaManager.grantRentalPass(context, hours = hours)
-                }
+                BillingManager.showUnavailable(context)
             }
         }
         onDismiss()

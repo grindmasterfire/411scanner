@@ -51,6 +51,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CardMembership
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -156,10 +160,28 @@ fun ScannerSurface(
              * Preview accepts already-processed bitmap state. Image decoding
              * and Base64 conversion remain orchestration responsibilities.
              */
+            var viewerOpen by remember { mutableStateOf(false) }
+            val canScan = hasValidBase64 && !isLoading && !isConverting
             ImagePreviewFrame(
                 bitmap = loadedBitmap,
-                isConverting = isConverting
+                isConverting = isConverting,
+                onOpen = { viewerOpen = true }
             )
+            if (viewerOpen && loadedBitmap != null) {
+                SpecimenViewer(
+                    bitmap = loadedBitmap,
+                    canScan = canScan,
+                    onScan = {
+                        viewerOpen = false
+                        onRunScan()
+                    },
+                    onChooseAnother = {
+                        viewerOpen = false
+                        onPickImage()
+                    },
+                    onClose = { viewerOpen = false }
+                )
+            }
 
             Spacer(
                 modifier = Modifier.height(16.dp)

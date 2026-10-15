@@ -340,7 +340,71 @@ function explainFinding(status, finding, field) {
   return f;
 }
 
-function normalizeEvidenceReceipt(receipt, groundedSourceMap) {
+/*
+ * Independent authority for "verified" on regulatory and consumer rows
+ * (red-team fix #6, 2026-10-15). A company's own page can't verify its own
+ * BBB record: Moonlock had 5 rows "verified" by macpaw.com/moonlock.
+ */
+const GOVERNMENT_HOST = /(^|\.)(gov|mil)(\.[a-z]{2})?$|\.gov\.[a-z]{2,3}$|\.gc\.ca$|(^|\.)gouv\.[a-z]{2}$|\.go\.[a-z]{2}$|\.govt\.nz$|(^|\.)europa\.eu$|\.lrv\.lt$|\.gob\.[a-z]{2}$/;
+const COURT_HOSTS = ["courtlistener.com", "justia.com", "pacermonitor.com", "unicourt.com", "casetext.com", "law.cornell.edu"];
+const REGISTRY_HOSTS = [
+  "opencorporates.com", "sec.gov", "finra.org", "nmlsconsumeraccess.org", "bizapedia.com", "dnb.com",
+  // Official state registries and licensing boards that aren't on .gov
+  // (AdventHealth's license row came from Florida's sunbiz.org, 10/15).
+  "sunbiz.org", "myflorida.com", "myfloridalicense.com", "nvsos.gov", "ilsos.gov",
+  "sosbiz.idaho.gov", "kepler.sos.ca.gov", "dos.ny.gov", "sos.state.tx.us",
+];
+// State government hosts on .us (sos.state.nv.us, www.state.mn.us, ...).
+const STATE_US_HOST = /(^|\.)(state|sos|dos|gov|courts?)\.[a-z0-9.-]*\.us$|(^|\.)state\.[a-z]{2}\.us$/;
+
+const hostIs = (host, domains) => domains.some((d) => host === d || host.endsWith(`.${d}`));
+
+const INDEPENDENT_AUTHORITY = {
+  "regulatory_record.bbb_record": (h) => hostIs(h, ["bbb.org"]),
+  "consumer_evidence.trustpilot": (h) => hostIs(h, ["trustpilot.com"]),
+  "regulatory_record.ftc_record": (h) => GOVERNMENT_HOST.test(h) || STATE_US_HOST.test(h) || hostIs(h, COURT_HOSTS),
+  "regulatory_record.license_status": (h) => GOVERNMENT_HOST.test(h) || STATE_US_HOST.test(h) || hostIs(h, REGISTRY_HOSTS),
+};
+const MUST_BE_INDEPENDENT = /^(regulatory_record|consumer_evidence)\./;
+
+/*
+ * Who "the company" is: its official and destination domains, plus its
+ * operator's name (MacPaw Inc. owns macpaw.com, which hosts moonlock pages).
+ */
+function companyContext(report) {
+  const identity = (report && report.solicitation_identity) || {};
+  const attribution = (report && report.technical_ledger && report.technical_ledger.attribution) || {};
+  const domains = [attribution.official_domain, identity.destination_domain]
+    .map((d) => hostOf(String(d || "").includes("://") ? d : `https://${d}`))
+    .filter((d) => d.includes("."));
+  const STOP = new Set(["inc", "llc", "ltd", "corp", "corporation", "company", "group", "holdings", "the", "co", "gmbh", "limited", "unidentified", "unknown", "individual"]);
+  // The operator's whole name, joined (MacPaw Inc. -> "macpaw"), never a
+  // single word of it: "Good Call Music" must not claim every "music" site.
+  const tokens = [identity.operator, attribution.operator_name]
+    .map((n) => String(n || "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w && !STOP.has(w)).join(""))
+    .filter((t) => t.length >= 4);
+  return { domains: [...new Set(domains)], tokens: [...new Set(tokens)] };
+}
+
+function isCompanyOwnHost(host, company) {
+  if (!host || !company) return false;
+  if (hostIs(host, company.domains) || company.domains.some((d) => d.endsWith(`.${host}`))) return true;
+  const label = (host.split(".").slice(-2, -1)[0] || "").replace(/-/g, "");
+  return company.tokens.some((t) => label === t || (label.startsWith(t) && label.length - t.length <= 6));
+}
+
+/** Why a "verified" regulatory/consumer row isn't independently sourced, or null. */
+function independenceProblem(field, sourceUrl, company) {
+  if (!MUST_BE_INDEPENDENT.test(field)) return null;
+  const host = hostOf(sourceUrl);
+  if (!host) return "no-source";
+  if (isCompanyOwnHost(host, company)) return "self-sourced";
+  const authority = INDEPENDENT_AUTHORITY[field];
+  if (authority && !authority(host)) return "not-the-authority";
+  return null;
+}
+
+function normalizeEvidenceReceipt(receipt, groundedSourceMap, company = null) {
   const rawStatus = clean(receipt?.status).toLowerCase();
   const requestedStatus = REPORTABLE_STATUSES.has(rawStatus)
     ? rawStatus
@@ -414,8 +478,23 @@ function normalizeEvidenceReceipt(receipt, groundedSourceMap) {
     normalized.finding = "";
   }
 
+  // Regulatory and consumer rows: "verified" needs an independent authority.
+  const problem =
+    normalized.status === "verified" && !isProbeReceipt
+      ? independenceProblem(normalized.field, normalized.source_url, company)
+      : null;
+
   if (normalized.status !== "verified" && normalized.status !== "not_applicable") {
     normalized.finding = explainFinding(normalized.status, normalized.finding, normalized.field);
+  }
+
+  if (problem) {
+    const claim = normalized.finding;
+    normalized.status = "searched_unconfirmed";
+    normalized.finding =
+      problem === "self-sourced"
+        ? `The company's own site says this; no independent source confirms it: ${claim}`
+        : `Reported, but not confirmed by the authority that keeps this record: ${claim}`;
   }
 
   // Final fallback: if source_url is still empty but Gemini proposed a valid
@@ -457,9 +536,10 @@ async function normalizeTechnicalEvidence(report, groundingInput = []) {
   if (!ledger) return report;
 
   const sourceMap = buildGroundedSourceMap(groundedSources);
+  const company = companyContext(report);
   const proposedReceipts = Array.isArray(ledger.evidence_receipts) ? ledger.evidence_receipts : [];
   ledger.evidence_receipts = proposedReceipts.map((receipt) =>
-    normalizeEvidenceReceipt(receipt, sourceMap)
+    normalizeEvidenceReceipt(receipt, sourceMap, company)
   );
 
   ledger.network_telemetry = ledger.network_telemetry || {};
@@ -474,6 +554,8 @@ async function normalizeTechnicalEvidence(report, groundingInput = []) {
 
 module.exports = {
   normalizeEvidenceReceipt,
+  companyContext,
+  independenceProblem,
   normalizeTechnicalEvidence,
   resolveGroundedSources,
 };

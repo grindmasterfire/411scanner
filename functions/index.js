@@ -89,6 +89,16 @@ const {
 const { writeIncident } = require("./incidentLedger");
 
 const {
+  orderKeyFor,
+  accountFingerprint,
+  claimOrder,
+} = require("./purchaseLedger");
+
+// Lazy: trust-client mode never needs googleapis.
+const consumeTopUp = (...a) => require("./playVerification").consumeTopUp(...a);
+const acknowledgeSubscription = (...a) => require("./playVerification").acknowledgeSubscription(...a);
+
+const {
   isPatternTarget,
   patternKeyFor,
   readPatternFile,
@@ -626,6 +636,37 @@ exports.grantEntitlement = onCall(
         verification.playOrderId) ||
       null;
 
+    /*
+     * Credit each Play order exactly once, to the account that bought it.
+     * The app re-sends active purchases on every launch; without this, each
+     * re-send reset a subscription's scans and re-credited top-ups.
+     */
+    if (
+      verification &&
+      verification.obfuscatedAccountId &&
+      verification.obfuscatedAccountId !== accountFingerprint(uid)
+    ) {
+      await rejectAttempt(
+        "wrong-account",
+        new HttpsError("permission-denied", "This purchase belongs to a different account.")
+      );
+    }
+    const orderKey = orderKeyFor({
+      orderId: verification && verification.playOrderId,
+      purchaseToken: data.purchaseToken,
+    });
+    const claim = await claimOrder(db, { orderKey, uid, productId, mode: verifyMode });
+    if (!claim.fresh) {
+      if (!claim.sameAccount) {
+        await rejectAttempt(
+          "order-claimed-by-other-account",
+          new HttpsError("permission-denied", "This purchase was already used by a different account.")
+        );
+      }
+      // Same order re-sent (app launch): already credited, nothing to do.
+      return { granted: true, alreadyCredited: true, kind: map.kind };
+    }
+
     async function recordGrant(
       familyGroupId
     ) {
@@ -651,6 +692,10 @@ exports.grantEntitlement = onCall(
         map.scans
       );
       await recordGrant(null);
+      // Consumed on Google's side: no replay, and the pack can be bought again.
+      if (verifyMode === "play-verified") {
+        await consumeTopUp(data.purchaseToken, productId);
+      }
       return {
         granted: true,
         kind: "topup",
@@ -666,6 +711,9 @@ exports.grantEntitlement = onCall(
     await recordGrant(
       doc.familyGroupId
     );
+    if (verifyMode === "play-verified" && !verification.acknowledged) {
+      await acknowledgeSubscription(data.purchaseToken, productId);
+    }
     return {
       granted: true,
       kind: "subscription",

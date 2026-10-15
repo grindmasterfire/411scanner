@@ -260,7 +260,7 @@ function mergeGroundingVerifications(verifications) {
  * probe unrelated to the report's own domains is discarded. Bump when a change makes older reports wrong to resell; each
  * older entry is then re-researched once on its next scan.
  */
-const REPORT_STANDARD = 7;
+const REPORT_STANDARD = 9;
 
 function meetsReportStandard(telemetry) {
   return Number(telemetry?.reportStandard || 0) >= REPORT_STANDARD;

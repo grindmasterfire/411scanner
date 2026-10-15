@@ -103,6 +103,7 @@ function applyEmailSender(report, ocrText, scannerEmail = "") {
   Object.assign(identity, sender);
 
   const notes = [];
+  if (sender.sender_cut_off) notes.push("the address is cut off in the screenshot, so its domain may be incomplete");
   if (sender.sender_is_free_mail) notes.push("a free webmail account, not a business domain");
   if (sender.reply_to_differs) notes.push(`replies go to a different address, ${sender.reply_to_address}`);
   const ledger = report.technical_ledger || (report.technical_ledger = {});
@@ -139,9 +140,53 @@ function reportDomains(report) {
     .filter((d) => d.includes(".") && !isPlatformHost(d));
 }
 
-function probeBelongsToReport(probe, report) {
-  const domains = reportDomains(report);
-  if (!domains.length) return true;
+/*
+ * Domains of a brand the solicitation impersonates (red-team fix #1). The
+ * #9 fake Stripe receipt put stripe.com in official/destination, so the
+ * server probed Stripe's real servers and showed them as "verified" on a
+ * phishing report. Gemini names the faked brand in related_domains; and
+ * when the report reads as impersonation, any official/destination domain
+ * that is neither the sender's nor a link's is the faked brand too.
+ */
+function cleanHost(d) {
+  return String(d || "").trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0].replace(/^www\./, "");
+}
+
+function impersonatedDomains(report, linkEvidence) {
+  const identity = (report && report.solicitation_identity) || {};
+  const attribution = (report && report.technical_ledger && report.technical_ledger.attribution) || {};
+  const pattern = (report && report.solicitation_pattern) || {};
+  const card = (report && report.consumer_card) || {};
+  const faked = new Set();
+  const signals = [identity.canonical_name, pattern.solicitation_type, ...(card.classification_badges || []), ...(pattern.behavioral_signals || [])]
+    .join(" ").toLowerCase();
+  if (!/impersonat|spoof|brand (mimic|abuse)|display name claims a brand|look-?alike/.test(signals)) return faked;
+  for (const d of attribution.related_domains || []) if (cleanHost(d).includes(".")) faked.add(cleanHost(d));
+  const actual = new Set(
+    [identity.sender_is_free_mail ? null : identity.sender_domain,
+     ...((linkEvidence && linkEvidence.links) || []).map((l) => l.finalDomain)]
+      .filter(Boolean).map(cleanHost)
+  );
+  for (const d of [attribution.official_domain, identity.destination_domain]) {
+    const h = cleanHost(d);
+    if (h.includes(".") && !actual.has(h)) faked.add(h);
+  }
+  return faked;
+}
+
+function probeBelongsToReport(probe, report, faked = new Set()) {
+  const probedHost = String(probe.apex_domain || probe.domain || "").toLowerCase().replace(/^www\./, "");
+  // Never measure a brand the scam is impersonating.
+  if ([...faked].some((d) => d === probedHost || probedHost.endsWith(`.${d}`))) return false;
+  const domains = reportDomains(report).filter((d) => !faked.has(d));
+  if (!domains.length) {
+    // An email screenshot shows more than the email: Yahoo's inbox ads
+    // (hellomillions.com, colonialpenn.com...) sat in the OCR text of two
+    // different spam emails and were probed as if they were the sender.
+    // For email, a domain the report doesn't tie to the message is out.
+    const channel = String((report && report.solicitation_identity && report.solicitation_identity.channel) || "").toLowerCase();
+    return channel !== "email";
+  }
   const probed = String(probe.apex_domain || probe.domain || "").toLowerCase().replace(/^www\./, "");
   return domains.some((d) => d === probed || d.endsWith(`.${probed}`) || probed.endsWith(`.${d}`));
 }
@@ -643,8 +688,9 @@ async function executeScan(
    * "mailyahoo.com" put Yahoo's registrar on two senders' reports). If it
    * matches none of the report's own domains, drop it and probe theirs.
    */
+  const fakedBrand = impersonatedDomains(report, linkEvidence);
   const relatedProbe =
-    probe && probe.measured && probeBelongsToReport(probe, report) ? probe : null;
+    probe && probe.measured && probeBelongsToReport(probe, report, fakedBrand) ? probe : null;
   if (relatedProbe) {
     // Server-owned infrastructure measurement (governance write).
     applyMeasuredLedger(report, relatedProbe);
@@ -662,17 +708,20 @@ async function executeScan(
     const tl = report.technical_ledger || {};
     const identity = report.solicitation_identity || {};
     const candidates = [
-      identity.channel === "email" && !identity.sender_is_free_mail ? identity.sender_domain : null,
+      identity.channel === "email" && !identity.sender_is_free_mail && !identity.sender_cut_off ? identity.sender_domain : null,
       tl.network_telemetry && tl.network_telemetry.app_package_or_domain,
       tl.attribution && tl.attribution.official_domain,
       identity.destination_domain,
     ].filter((c) => c && String(c).includes("."));
-    const ownDomains = candidates.filter((c) => !isPlatformListing(c));
+    const ownDomains = candidates.filter(
+      (c) => !isPlatformListing(c) && !fakedBrand.has(cleanHost(c))
+    );
 
     if (candidates.length && !ownDomains.length) {
-      // Only platform hosts (app store, LinkedIn, ...): their infrastructure
-      // says nothing about the business; proceed on OSINT + model analysis.
-      probeStatus = "platform_target_no_probe";
+      // Only platform hosts (app store, LinkedIn, ...) or the brand being
+      // impersonated: their infrastructure says nothing about the sender;
+      // proceed on OSINT + model analysis.
+      probeStatus = fakedBrand.size ? "impersonated_brand_not_probed" : "platform_target_no_probe";
     } else if (ownDomains.length) {
       candidates.splice(0, candidates.length, ...ownDomains);
       const fallbackProbe = await runNetworkProbe(null, candidates[0]);
@@ -997,5 +1046,6 @@ module.exports = {
   _isPlatformListing: isPlatformListing,
   _applyEmailSender: applyEmailSender,
   _probeBelongsToReport: probeBelongsToReport,
+  _impersonatedDomains: impersonatedDomains,
   _hasEntityName: hasEntityName,
 };

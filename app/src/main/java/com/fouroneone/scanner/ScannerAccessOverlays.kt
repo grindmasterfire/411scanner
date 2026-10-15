@@ -40,25 +40,6 @@ fun ScannerAccessOverlays(
         PaywallModal(
             onDismiss = onDismissPaywall,
             onPlansClick = onPlansClick,
-            onFallbackGrant = { productId ->
-                coroutineScope.launch {
-                    // Interim device-side pass; the server writes the real
-                    // scan-bucket entitlement. Top-ups have no time-based
-                    // equivalent — fallback grants a 24h pass.
-                    val hours = when (productId) {
-                        BillingManager.PRODUCT_TOPUP_5,
-                        BillingManager.PRODUCT_TOPUP_10,
-                        BillingManager.PRODUCT_TOPUP_20,
-                        BillingManager.PRODUCT_TOPUP_FAMILY_25 -> 24
-                        BillingManager.PRODUCT_STANDARD_WEEKLY -> 24 * 7
-                        BillingManager.PRODUCT_STANDARD_MONTHLY,
-                        BillingManager.PRODUCT_PRO_MONTHLY,
-                        BillingManager.PRODUCT_FAMILY_MONTHLY -> 24 * 30
-                        else -> 24 * 365
-                    }
-                    QuotaManager.grantRentalPass(context, hours = hours)
-                }
-            }
         )
     }
 

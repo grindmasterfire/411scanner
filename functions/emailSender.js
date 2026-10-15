@@ -20,6 +20,16 @@ const FREE_MAIL_DOMAINS = new Set([
   "proton.me", "protonmail.com", "zoho.com", "gmx.com", "gmx.net", "yandex.com", "mail.ru",
 ]);
 
+// Generic TLDs seen in real mail; any two-letter country code also counts.
+const KNOWN_TLD = new Set([
+  "com", "net", "org", "edu", "gov", "mil", "int", "info", "biz", "name", "pro", "io", "ai", "app",
+  "dev", "co", "me", "tv", "xyz", "top", "online", "site", "store", "shop", "club", "live", "email",
+  "click", "link", "life", "world", "today", "news", "space", "tech", "website", "health", "finance",
+  "money", "loan", "loans", "bank", "insurance", "agency", "solutions", "services", "support", "help",
+  "systems", "digital", "media", "network", "group", "global", "company", "center", "zone", "work",
+  "icu", "cyou", "sbs", "cfd", "bond", "buzz", "monster", "rest", "lol", "fun", "vip", "win", "bid",
+]);
+
 function addressesInLine(line) {
   return (String(line || "").match(ADDRESS_RE) || []).map((a) => a.toLowerCase());
 }
@@ -63,11 +73,15 @@ function extractEmailSender(ocrText, { exclude = [] } = {}) {
   sender = sender || loose[0] || "";
   if (!sender && !replyTo) return null;
   const senderDomain = domainOf(sender);
+  // A screenshot can cut an address off mid-domain ("...@dianaforge.pawtrainingt").
+  const tld = senderDomain.split(".").pop() || "";
+  const senderCutOff = Boolean(sender) && !KNOWN_TLD.has(tld) && !/^[a-z]{2}$/.test(tld);
   return {
     sender_address: sender,
     sender_domain: senderDomain,
     reply_to_address: replyTo,
     sender_is_free_mail: FREE_MAIL_DOMAINS.has(senderDomain),
+    sender_cut_off: senderCutOff,
     reply_to_differs: Boolean(replyTo && sender && replyTo !== sender),
   };
 }

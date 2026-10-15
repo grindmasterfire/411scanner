@@ -91,7 +91,8 @@ object QuotaManager {
 
     private val KEY_WEEKLY_SCAN_COUNT = intPreferencesKey("weekly_scan_count")
     private val KEY_LAST_SCAN_WEEK = stringPreferencesKey("last_scan_week")
-    private val KEY_RENTAL_EXPIRY = longPreferencesKey("rental_expiry_timestamp")
+    // Old interim device-side pass, no longer read or written: purchases
+    // count only once the server verifies them with Google (11.2).
 
     /** Bumped after each delivered scan so the server quota is re-read. */
     private val refreshTick = MutableStateFlow(0)
@@ -114,10 +115,6 @@ object QuotaManager {
         return email.equals(TESTER_UNLIMITED_EMAIL, ignoreCase = true)
     }
 
-    private fun isRentalActive(prefs: Preferences): Boolean {
-        val rentalExpiry = prefs[KEY_RENTAL_EXPIRY] ?: 0L
-        return System.currentTimeMillis() < rentalExpiry
-    }
 
     /**
      * Flow emitting the real-time quota entitlement state.
@@ -140,7 +137,6 @@ object QuotaManager {
             serverQuotaFlow
         ) { prefs, _, serverQuota ->
             val tester = isTesterUnlimited()
-            val rentalActive = isRentalActive(prefs)
             val week = getWeekKey()
 
             val lastWeek = prefs[KEY_LAST_SCAN_WEEK] ?: week
@@ -152,7 +148,8 @@ object QuotaManager {
             val maxFree = serverFree?.scansAllowed ?: getMaxWeeklyScans()
             val usedThisWeek = serverFree?.scansUsed ?: localUsed
 
-            val subscriber = paidServer || rentalActive
+            // Only the server's verified entitlement makes a subscriber.
+            val subscriber = paidServer
             val unlimited = tester || subscriber
             val remaining = if (unlimited) 999 else (maxFree - usedThisWeek).coerceAtLeast(0)
 
@@ -171,7 +168,7 @@ object QuotaManager {
                 weeklyScansUsed = usedThisWeek,
                 maxWeeklyScans = maxFree,
                 isTesterUnlimited = tester,
-                rentalExpiryTimestamp = prefs[KEY_RENTAL_EXPIRY] ?: 0L,
+                rentalExpiryTimestamp = 0L,
                 remainingScans = remaining,
                 isUnlimited = unlimited,
                 serverQuota = serverQuota,
@@ -193,7 +190,6 @@ object QuotaManager {
             return sq.remaining > 0 || sq.topUpScans > 0
         }
         val prefs = context.quotaDataStore.data.first()
-        if (isRentalActive(prefs)) return true
 
         val week = getWeekKey()
         val lastWeek = prefs[KEY_LAST_SCAN_WEEK] ?: week
@@ -213,16 +209,5 @@ object QuotaManager {
             prefs[KEY_WEEKLY_SCAN_COUNT] = currentCount + 1
         }
         refreshServerQuota()
-    }
-
-    /**
-     * Interim device-side pass for subscription purchases. The server writes
-     * the real scan-bucket entitlement; this keeps the app usable offline.
-     */
-    suspend fun grantRentalPass(context: Context, hours: Int = 24) {
-        val expiry = System.currentTimeMillis() + (hours * 3600 * 1000L)
-        context.quotaDataStore.edit { prefs ->
-            prefs[KEY_RENTAL_EXPIRY] = expiry
-        }
     }
 }

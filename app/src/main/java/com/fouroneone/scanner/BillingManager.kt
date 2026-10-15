@@ -141,7 +141,30 @@ object BillingManager : PurchasesUpdatedListener {
         }
     }
 
-    fun launchPurchase(activity: Activity, productId: String, onFallbackGrant: () -> Unit) {
+    /** Shown when Play billing can't be reached; nothing is granted. */
+    fun showUnavailable(context: android.content.Context) {
+        android.widget.Toast.makeText(
+            context,
+            "Purchases aren't available right now. Please try again later.",
+            android.widget.Toast.LENGTH_LONG
+        ).show()
+    }
+
+    /**
+     * Same fingerprint the server checks (functions/purchaseLedger.js
+     * accountFingerprint): ties the purchase to the signed-in account.
+     */
+    private fun accountFingerprint(uid: String): String =
+        java.security.MessageDigest.getInstance("SHA-256")
+            .digest("411-account:$uid".toByteArray())
+            .joinToString("") { "%02x".format(it) }
+
+    /**
+     * Starts the Play purchase. When Play billing isn't reachable, calls
+     * [onUnavailable]: nothing is granted on the device (the server grants
+     * only verified purchases).
+     */
+    fun launchPurchase(activity: Activity, productId: String, onUnavailable: () -> Unit) {
         val client = billingClient
         val details = _productDetailsMap.value[productId]
 
@@ -165,14 +188,16 @@ object BillingManager : PurchasesUpdatedListener {
                 }
             }
 
+            val uid = AuthManager.userState.value.uid
             val flowParams = BillingFlowParams.newBuilder()
                 .setProductDetailsParamsList(productDetailsParamsList)
+                .apply { if (uid.isNotBlank()) setObfuscatedAccountId(accountFingerprint(uid)) }
                 .build()
 
             client.launchBillingFlow(activity, flowParams)
         } else {
-            Log.d(TAG, "Billing not fully configured/connected on Play Console. Applying fallback test entitlement.")
-            onFallbackGrant()
+            Log.d(TAG, "Play billing unavailable; nothing granted.")
+            onUnavailable()
         }
     }
 
@@ -189,23 +214,14 @@ object BillingManager : PurchasesUpdatedListener {
     }
 
     private fun handlePurchase(purchase: Purchase) {
-        val context = appContext ?: return
         if (purchase.purchaseState == Purchase.PurchaseState.PURCHASED) {
             billingScope.launch {
                 for (productId in purchase.products) {
-                    // Interim device-side pass per billing period. The real
-                    // per-user scan-bucket entitlement is written server-side.
-                    when (productId) {
-                        PRODUCT_STANDARD_WEEKLY ->
-                            QuotaManager.grantRentalPass(context, hours = 24 * 7)
-                        PRODUCT_STANDARD_MONTHLY, PRODUCT_PRO_MONTHLY, PRODUCT_FAMILY_MONTHLY ->
-                            QuotaManager.grantRentalPass(context, hours = 24 * 30)
-                        PRODUCT_STANDARD_ANNUAL, PRODUCT_PRO_ANNUAL, PRODUCT_FAMILY_ANNUAL ->
-                            QuotaManager.grantRentalPass(context, hours = 24 * 365)
-                    }
-                    // Server-side: write the real scan-bucket entitlement for this UID.
+                    // The server verifies with Google and credits each order
+                    // once; re-sends (every launch) are no-ops there.
                     grantEntitlementServerSide(productId, purchase.purchaseToken)
                 }
+                QuotaManager.refreshServerQuota()
             }
 
             if (!purchase.isAcknowledged) {

@@ -53,11 +53,10 @@ function loadCredentials() {
       );
     }
   }
-  throw httpsError(
-    "failed-precondition",
-    "Play verification is enabled but no service account is configured. " +
-      "Set PLAY_SERVICE_ACCOUNT_PATH or PLAY_SERVICE_ACCOUNT_JSON."
-  );
+  // No key configured: use the function's own runtime identity (Application
+  // Default Credentials). Nothing to leak. Play Console must grant that
+  // service account access (Users and permissions).
+  return null;
 }
 
 /**
@@ -79,7 +78,7 @@ async function buildClient(injected) {
   }
   const credentials = loadCredentials();
   const auth = new google.auth.GoogleAuth({
-    credentials,
+    ...(credentials ? { credentials } : {}),
     scopes: [ANDROID_PUBLISHER_SCOPE],
   });
   return google.androidpublisher({ version: "v3", auth });
@@ -124,6 +123,9 @@ async function verifySubscription(client, purchaseToken, productId) {
     verified: true,
     mode: "play-verified",
     playOrderId: sub.latestOrderId || null,
+    obfuscatedAccountId:
+      sub.externalAccountIdentifiers?.obfuscatedExternalAccountId || null,
+    acknowledged: sub.acknowledgementState === "ACKNOWLEDGEMENT_STATE_ACKNOWLEDGED",
   };
 }
 
@@ -162,7 +164,46 @@ async function verifyConsumable(client, purchaseToken, productId) {
     verified: true,
     mode: "play-verified",
     playOrderId: prod.orderId || null,
+    obfuscatedAccountId: prod.obfuscatedExternalAccountId || null,
   };
+}
+
+/*
+ * After crediting a top-up, consume it on Google's side: a consumed token
+ * can't be replayed, and the user can buy the same pack again. Best-effort;
+ * the order ledger already blocks a second credit.
+ */
+async function consumeTopUp(purchaseToken, productId, opts) {
+  try {
+    const client = await buildClient(opts);
+    await client.purchases.products.consume({
+      packageName: PACKAGE_NAME,
+      productId,
+      token: purchaseToken,
+    });
+    return true;
+  } catch (e) {
+    console.warn(`[play-verify] consume failed for ${productId}: ${e.message || e}`);
+    return false;
+  }
+}
+
+/* Acknowledge a subscription server-side (Google refunds un-acknowledged
+ * purchases after 3 days); the app acknowledges too. Best-effort. */
+async function acknowledgeSubscription(purchaseToken, productId, opts) {
+  try {
+    const client = await buildClient(opts);
+    await client.purchases.subscriptions.acknowledge({
+      packageName: PACKAGE_NAME,
+      subscriptionId: productId,
+      token: purchaseToken,
+      requestBody: {},
+    });
+    return true;
+  } catch (e) {
+    console.warn(`[play-verify] acknowledge failed for ${productId}: ${e.message || e}`);
+    return false;
+  }
 }
 
 /**
@@ -189,6 +230,8 @@ async function verifyPlayPurchase(purchaseToken, productId, kind, opts) {
 module.exports = {
   PACKAGE_NAME,
   verifyPlayPurchase,
+  consumeTopUp,
+  acknowledgeSubscription,
   // exported for unit tests
   _verifySubscription: verifySubscription,
   _verifyConsumable: verifyConsumable,

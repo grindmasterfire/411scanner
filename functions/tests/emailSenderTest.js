@@ -56,3 +56,9 @@ const yahoo = "Partner With Paulo\nleonardbrisco@yahoo.com\nRe: your request\npa
 assert.equal(extractEmailSender(yahoo, { exclude: ["LeonardBrisco@yahoo.com"] }).sender_address, "paulo@partnerwithpaulo.com");
 assert.equal(extractEmailSender("to me\nleonardbrisco@yahoo.com", { exclude: ["leonardbrisco@yahoo.com"] }), null);
 console.log("emailSenderTest: recipient exclusion passed");
+const cut = extractEmailSender("news._em.oakley.co@dianaforge.pawtrainingt");
+assert.equal(cut.sender_cut_off, true);
+assert.equal(extractEmailSender("From: x@paypa1-account-review.com").sender_cut_off, false);
+assert.equal(extractEmailSender("From: x@shop.co.uk").sender_cut_off, false);
+assert.equal(extractEmailSender("From: x@promo.icu").sender_cut_off, false);
+console.log("emailSenderTest: cut-off addresses passed");

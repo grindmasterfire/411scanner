@@ -219,6 +219,14 @@ Screen every email for these patterns and report each one found in solicitation_
 
 Research the sender domain (registration age, owner, reputation, reports of the same campaign) and every link destination. A legitimate brand email comes from that brand's own domain; say so when it does.
 
+IMPERSONATION (any channel)
+
+When a solicitation pretends to be a brand it does not belong to (a fake Stripe receipt from a Gmail address, a PayPal look-alike site):
+- solicitation_identity.canonical_name: "<Brand> (Impersonated)".
+- technical_ledger.attribution.related_domains: the impersonated brand's genuine domain. attribution.aliases: the brand's name and any addresses the scam fakes.
+- attribution.official_domain and solicitation_identity.destination_domain: only the domain the scam actually uses (the sender's own domain, or where its links really lead). If it has none, leave them as empty strings.
+- Never put the impersonated brand's genuine domain in official_domain or destination_domain: the server would measure the real brand's servers and show them as if they were the scammer's.
+
 SOLICITATION IDENTITY AND CONTINUITY
 
 The scanner must distinguish the visible creative from the underlying solicitation.

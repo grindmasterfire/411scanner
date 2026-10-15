@@ -141,7 +141,6 @@ internal val TOPUP_TIERS = listOf(
 @Composable
 fun PaywallModal(
     onDismiss: () -> Unit,
-    onFallbackGrant: (productId: String) -> Unit,
     onPlansClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -221,10 +220,10 @@ fun PaywallModal(
                     val activity = context as? Activity
                     if (activity != null) {
                         BillingManager.launchPurchase(activity, selectedProductId) {
-                            onFallbackGrant(selectedProductId)
+                            BillingManager.showUnavailable(context)
                         }
                     } else {
-                        onFallbackGrant(selectedProductId)
+                        BillingManager.showUnavailable(context)
                     }
                     onDismiss()
                 },
