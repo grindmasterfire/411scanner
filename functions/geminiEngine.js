@@ -101,6 +101,8 @@ const { probeContextBlock } = require("./networkProbe");
 
 const { stripDownloadLinks } = require("./downloadLinkGuard");
 
+const { fillLedgerDisplays } = require("./ledgerDisplayFill");
+
 const { REPORT_STANDARD } = require("./groundingVerification");
 
 const PASS1_MODEL =
@@ -963,6 +965,8 @@ Instructions:
     enforceTechnicalFactPrecision(parsedData.technical_ledger);
     enforceTechnicalEvidencePrecision(parsedData);
     enforceRegulatoryEvidencePrecision(parsedData.technical_ledger);
+    // Every ledger row: the finding, or why we couldn't get it.
+    fillLedgerDisplays(parsedData.technical_ledger);
   }
 
   // Links open web pages, never files (10/14 APK download).

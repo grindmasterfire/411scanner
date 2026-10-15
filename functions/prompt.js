@@ -1134,7 +1134,7 @@ TECHNICAL 411 EVIDENCE RECEIPTS
 
 Always return evidence_receipts as required by the supplied response schema.
 
-You MUST emit a receipt for each of the following 19 fields, using one of the states above. Do NOT skip fields.
+You MUST emit a receipt for each of the following 23 fields, using one of the states above. Do NOT skip fields. Each one becomes a row the customer reads.
 
 THIN TARGETS: If the target is new (days or weeks old, e.g. a fresh crypto presale or
 airdrop) and has not yet generated a public footprint, say so explicitly. The report must
@@ -1162,6 +1162,18 @@ the user the target is too new to have a track record, which is itself a signal.
 17. regulatory_record.ftc_record
 18. regulatory_record.review_spread
 19. commercial_terms.withdrawal_gate
+20. regulatory_record.complaint_pattern
+21. consumer_evidence.trustpilot (search Trustpilot by company name and domain; report the rating, review count, and recurring themes, or why there is no profile)
+22. monetization.affiliate_disclosure
+23. monetization.guarantee_terms
+
+LICENSE STATUS (regulatory_record.license_status) ALWAYS APPLIES
+
+Every business that faces the public is registered somewhere. license_status reports two things:
+1. Business registration: the state entity filing (LLC, corporation, foreign registration) or the DBA / assumed-name / fictitious-business-name filing, with the state or county and the registration number when found. Search the likely Secretary of State, the county DBA registry, and OpenCorporates.
+2. Industry licensing: any license the activity requires (financial, lending, money transmission, gambling, health, contractor, and so on), or, after checking, that the activity needs none beyond its business registration.
+
+Never use not_applicable for license_status, bbb_record, ftc_record, complaint_pattern, review_spread, or consumer_evidence.trustpilot: these apply to every business. If a record can't be reached or doesn't exist, use the searched_* state that says why.
 
 For probe-supplied fields (4-14), the server stamps these automatically from its own measurements and replaces any receipt you write for them. Do not write them; spend the effort on attribution, addresses, and regulatory records.
 

@@ -121,25 +121,25 @@ fun TechnicalLedgerTab(
         LedgerCard("NETWORK & TELEMETRY") {
             LedgerItem(
                 "Package / Domain",
-                nt.appPackageOrDomain.ifBlank { "Not established" }
+                nt.appPackageOrDomain.ifBlank { "No finding in this report" }
             )
 
             LedgerItem(
                 "Host / CDN",
-                nt.hostCdn.ifBlank { "Not established" }
+                nt.hostCdn.ifBlank { "No finding in this report" }
             )
 
             LedgerItem(
                 "Domain Age",
                 nt.domainAgeDays?.let { "$it days" }
-                    ?: "Not established"
+                    ?: "No finding in this report"
             )
 
             LedgerItem(
                 "TLS Status",
                 nt.tlsCertificateStatus
                     ?.takeIf { it.isNotBlank() }
-                    ?: "Not established"
+                    ?: "No finding in this report"
             )
 
             if (nt.groundingSources.isNotEmpty()) {
@@ -153,22 +153,22 @@ fun TechnicalLedgerTab(
         LedgerCard("MONETIZATION") {
             LedgerItem(
                 "Revenue Model",
-                mon.revenueModel.ifBlank { "Not established" }
+                mon.revenueModel.ifBlank { "No finding in this report" }
             )
 
             LedgerItem(
                 "Pricing",
-                mon.pricing.ifBlank { "Not established" }
+                mon.pricing.ifBlank { "No finding in this report" }
             )
 
             LedgerItem(
                 "Affiliate Disclosure",
-                mon.affiliateDisclosure.ifBlank { "Not established" }
+                mon.affiliateDisclosure.ifBlank { "No finding in this report" }
             )
 
             LedgerItem(
                 "Guarantee / Refund",
-                mon.guaranteeTerms.ifBlank { "Not established" }
+                mon.guaranteeTerms.ifBlank { "No finding in this report" }
             )
         }
 
@@ -231,12 +231,12 @@ fun TechnicalLedgerTab(
 
                 LedgerItem(
                     "Final Destination",
-                    redirectPath.finalDestination.ifBlank { "Not established" }
+                    redirectPath.finalDestination.ifBlank { "No finding in this report" }
                 )
 
                 LedgerItem(
                     "Final Domain",
-                    redirectPath.finalDomain.ifBlank { "Not established" }
+                    redirectPath.finalDomain.ifBlank { "No finding in this report" }
                 )
 
                 redirectPath.shortenerIdentity?.let {
@@ -471,7 +471,7 @@ private fun String.evidenceStateLabel():
     String =
     when (trim().lowercase()) {
         "" ->
-            "Not established"
+            "No finding in this report"
 
         // Codes from reports cached before 2026-10-15.
         "unresolved" ->

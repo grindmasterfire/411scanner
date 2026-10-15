@@ -48,6 +48,20 @@ const LEGACY_STATUS_MAP = {
   unresolved: "searched_conflicting",
 };
 
+/*
+ * Rows that apply to every business that faces the public: there is
+ * always a registration, a BBB/FTC/Trustpilot answer, a complaint and
+ * review picture. "Not applicable" here only means we didn't ask.
+ */
+const ALWAYS_APPLICABLE = new Set([
+  "regulatory_record.license_status",
+  "regulatory_record.bbb_record",
+  "regulatory_record.ftc_record",
+  "regulatory_record.complaint_pattern",
+  "regulatory_record.review_spread",
+  "consumer_evidence.trustpilot",
+]);
+
 const FIELD_LABELS = {
   "attribution.operator_name": "who operates it",
   "attribution.official_domain": "its official website",
@@ -56,7 +70,10 @@ const FIELD_LABELS = {
   "domain_registration.registrant": "who registered the domain",
   "infrastructure.origin_host": "the hosting provider",
   "infrastructure.host_cdn": "the content delivery network",
-  "regulatory_record.license_status": "licenses or registrations",
+  "regulatory_record.license_status": "business registrations (entity or DBA filings) or licenses",
+  "consumer_evidence.trustpilot": "a Trustpilot profile",
+  "monetization.affiliate_disclosure": "an affiliate disclosure",
+  "monetization.guarantee_terms": "guarantee or refund terms",
   "regulatory_record.bbb_record": "a Better Business Bureau record",
   "regulatory_record.ftc_record": "FTC enforcement records",
   "regulatory_record.complaint_pattern": "consumer complaints",
@@ -389,6 +406,12 @@ function normalizeEvidenceReceipt(receipt, groundedSourceMap) {
   if (normalized.finding.toLowerCase().includes("sec certified")) {
     normalized.status = "searched_unconfirmed";
     normalized.finding = normalized.finding.replace(/sec certified/gi, "SEC registration not established");
+  }
+
+  if (normalized.status === "not_applicable" && ALWAYS_APPLICABLE.has(normalized.field)) {
+    // Its "doesn't apply" sentence would be wrong; give the real reason.
+    normalized.status = "searched_not_found";
+    normalized.finding = "";
   }
 
   if (normalized.status !== "verified" && normalized.status !== "not_applicable") {
