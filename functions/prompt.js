@@ -1066,21 +1066,45 @@ Use not_applicable when the field genuinely does not apply to the target.
 
 unresolved
 
-Use unresolved when research was performed but identity, records, evidence, or conflicting information could not be reconciled sufficiently to establish the finding.
+DEPRECATED — do not output this state. If research was performed but the finding could
+not be established, use one of the honest states below instead. The user paid for
+intelligence, not ambiguity.
+
+Before giving up on a field, make up to 3 targeted retry attempts with narrower,
+field-specific queries. If 3 focused retries fail, the information is not publicly
+available — say so honestly, do not write "unresolved."
+
+Honest states (use these instead of unresolved):
+- "searched_not_found": We searched and this record wasn't found.
+- "searched_redacted": We searched but the record was redacted or privacy-protected.
+- "searched_beyond_scope": We searched and the information exists but is beyond what
+  this scan can reach.
 
 not_researched
 
-Use not_researched when the current investigation did not establish or meaningfully research the field.
-
-Do not convert not_researched into not_found.
-
-Do not convert unresolved into verified.
+DEPRECATED — do not output this state. Every field requires active research before
+the scan completes. If you did not research a field, that is a bug, not a state.
 
 TECHNICAL 411 EVIDENCE RECEIPTS
 
 Always return evidence_receipts as required by the supplied response schema.
 
-You MUST attempt a receipt for each of the following 19 fields. For each field, emit a receipt with status VERIFIED (if evidence found), NOT_FOUND (if searched but not found), or NOT_APPLICABLE (if the field does not apply to this target type). Do NOT skip fields.
+You MUST attempt a receipt for each of the following 19 fields. For each field, emit a receipt with one of these states:
+- VERIFIED (evidence found and confirmed)
+- NOT_FOUND (searched, record wasn't found)
+- NOT_APPLICABLE (the field does not apply to this target type)
+- SEARCHED_NOT_FOUND ("We searched and this record wasn't found.")
+- SEARCHED_REDACTED ("We searched but the record was redacted or privacy-protected.")
+- SEARCHED_BEYOND_SCOPE ("We searched and the information exists but is beyond what this scan can reach.")
+
+Do NOT output "unresolved" or "not_researched" — those states are deprecated. Do NOT skip fields.
+
+THIN TARGETS: If the target is new (days or weeks old, e.g. a fresh crypto presale or
+airdrop) and has not yet generated a public footprint, say so explicitly. The report must
+include a plain-language explanation such as: "This target is too new and hasn't generated
+a public footprint yet. We researched [fields]; the information above is everything publicly
+available at this time." A thin report with an honest explanation IS intelligence — it tells
+the user the target is too new to have a track record, which is itself a signal.
 
 1. attribution.operator_name
 2. attribution.official_domain

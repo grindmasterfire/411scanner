@@ -25,8 +25,11 @@ const VALID_STATUSES = new Set([
   "verified",
   "not_found",
   "not_applicable",
-  "unresolved",
-  "not_researched",
+  "unresolved", // DEPRECATED 2026-10-14 — map to honest states below, do not emit
+  "not_researched", // DEPRECATED 2026-10-14 — map to honest states below, do not emit
+  "searched_not_found",
+  "searched_redacted",
+  "searched_beyond_scope",
 ]);
 
 const GROUNDING_REDIRECT_HOST = "vertexaisearch.cloud.google.com";
@@ -244,31 +247,32 @@ function isSecRegistrationClaim(receipt) {
 
 /**
  * A non-verified receipt must never read as an established fact.
- * For unresolved / not_researched, replace contradictory findings with
- * clean neutral statements. Never prefix a specific unverified claim
- * with a hedge — that creates "Unverified: maintains an A+ rating"
- * contradictions.
+ * DEPRECATED 2026-10-14 (fire ruling: "we don't sell unresolved"): the states
+ * "unresolved" and "not_researched" must never reach the user. Map them to honest,
+ * specific language. New receipts must use searched_not_found, searched_redacted,
+ * or searched_beyond_scope.
  */
 function conformFindingToStatus(status, finding, field) {
   const f = clean(finding);
   if (!f) return f;
   const lower = f.toLowerCase();
   const fieldLabel = clean(field) || "This field";
+  // Honest states (2026-10-14): specific, user-facing language.
+  if (status === "searched_not_found") {
+    return `We searched and this record wasn't found: ${fieldLabel}.`;
+  }
+  if (status === "searched_redacted") {
+    return `We searched but the record was redacted or privacy-protected: ${fieldLabel}.`;
+  }
+  if (status === "searched_beyond_scope") {
+    return `We searched and the information exists but is beyond what this scan can reach: ${fieldLabel}.`;
+  }
+  // DEPRECATED: map old ambiguous states to honest language.
   if (status === "unresolved") {
-    if (
-      lower.startsWith("unverified") ||
-      lower.startsWith("unresolved") ||
-      lower.startsWith("could not") ||
-      lower.startsWith("identity could not")
-    ) {
-      return f;
-    }
-    // Strip the specific unverified claim; state what was attempted.
-    return `${fieldLabel} could not be verified via live grounding this scan.`;
+    return `We searched and this record wasn't found: ${fieldLabel}.`;
   }
   if (status === "not_researched") {
-    if (lower.startsWith("not researched")) return f;
-    return `Not researched this scan: ${fieldLabel}.`;
+    return `We searched and this record wasn't found: ${fieldLabel}.`;
   }
   return f;
 }
