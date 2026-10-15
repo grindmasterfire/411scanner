@@ -297,6 +297,7 @@ async function executeScan(
       tier: entitlement.tier,
       adTicket: data.adTicket,
       adNoFill: data.adNoFill === true,
+      deviceKey: data.deviceKey || null,
     });
   } catch (gateErr) {
     // Observe mode (rollout): log what enforcement would reject and let

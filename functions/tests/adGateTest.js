@@ -229,6 +229,32 @@ test("released subscriber ticket can be reused after a quota refusal", async () 
   assert.equal((await gate.enforceAdGate(db, { uid: UID, tier: "rental", adTicket: t })).mode, "subscriber_verified");
 });
 
+const DEVICE = "a".repeat(64);
+
+test("free scan is per device too: a new anonymous account on the same phone gets none (60101)", async () => {
+  const db = new MockDb();
+  const out = await gate.enforceAdGate(db, { uid: UID, adTicket: await verifiedTicket(db), deviceKey: DEVICE });
+  assert.equal(out.mode, "free_verified");
+  // Clearing app data = new anonymous uid, same Android ID.
+  await rejects(gate.enforceAdGate(db, { uid: "user-b", adTicket: await verifiedTicket(db, "user-b"), deviceKey: DEVICE }), "60101");
+  const usage = await gate.getFreeUsage(db, "user-b", DEVICE);
+  assert.equal(usage.freeScansUsed, 1, "badge shows the device's used scan");
+  assert.ok(![...db.store.keys()].some((k) => k.includes(DEVICE)), "raw device key never stored");
+});
+
+test("a different device still gets its own free scan", async () => {
+  const db = new MockDb();
+  await gate.enforceAdGate(db, { uid: UID, adTicket: await verifiedTicket(db), deviceKey: DEVICE });
+  const other = await gate.enforceAdGate(db, { uid: "user-b", adTicket: await verifiedTicket(db, "user-b"), deviceKey: "b".repeat(64) });
+  assert.equal(other.mode, "free_verified");
+});
+
+test("malformed device key is ignored (account rule still applies)", async () => {
+  const db = new MockDb();
+  await gate.enforceAdGate(db, { uid: UID, adTicket: await verifiedTicket(db), deviceKey: "not-a-key" });
+  await rejects(gate.enforceAdGate(db, { uid: UID, adTicket: await verifiedTicket(db), deviceKey: "not-a-key" }), "60101");
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of tests) {

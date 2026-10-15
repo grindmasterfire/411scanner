@@ -180,10 +180,41 @@ function freeWindowState(usage, now) {
 }
 
 /** Free-scan status for the quota badge. */
-async function getFreeUsage(db, uid) {
+/*
+ * The weekly free scan belongs to the device as well as the account.
+ * Clearing app data signs the phone in as a brand-new anonymous user, so
+ * per-account counting alone handed out a free scan per reset (5 free
+ * scans, 5 anonymous accounts, 10/14-15). The app sends a hash of the
+ * Android ID (stable across data clears and reinstalls); the server hashes
+ * it again so the stored key never matches anything on the phone.
+ */
+const DEVICE_KEY_RE = /^[a-f0-9]{64}$/;
+
+function deviceDocId(deviceKey) {
+  const key = String(deviceKey || "").toLowerCase();
+  if (!DEVICE_KEY_RE.test(key)) return null;
+  return crypto.createHash("sha256").update(`411-free-device:${key}`).digest("hex");
+}
+
+/** The stricter of the account's and the device's free window. */
+function stricterWindow(a, b) {
+  if (!b) return a;
+  if (b.scansUsed > a.scansUsed) return b;
+  if (a.scansUsed > b.scansUsed) return a;
+  return a.windowStartMs >= b.windowStartMs ? a : b;
+}
+
+async function getFreeUsage(db, uid, deviceKey = null) {
   const snap = await db.collection("free_usage").doc(uid).get();
   const now = Date.now();
-  const state = freeWindowState(snap.exists ? snap.data() : null, now);
+  const deviceId = deviceDocId(deviceKey);
+  const deviceSnap = deviceId
+    ? await db.collection("free_usage_devices").doc(deviceId).get()
+    : null;
+  const state = stricterWindow(
+    freeWindowState(snap.exists ? snap.data() : null, now),
+    deviceSnap ? freeWindowState(deviceSnap.exists ? deviceSnap.data() : null, now) : null
+  );
   return {
     freeScansAllowed: FREE_SCANS_PER_WINDOW,
     freeScansUsed: state.scansUsed,
@@ -215,7 +246,7 @@ async function waitForTicket(db, adTicket) {
  */
 async function enforceAdGate(
   db,
-  { uid, isTester = false, tier = "free", adTicket, adNoFill = false }
+  { uid, isTester = false, tier = "free", adTicket, adNoFill = false, deviceKey = null }
 ) {
   if (isTester) return { mode: "tester" };
   // Entitlement tier ids come from entitlementStore: Professional is "pro".
@@ -225,10 +256,11 @@ async function enforceAdGate(
   const isFree = !tier || tier === "free";
   const now = Date.now();
 
+  const deviceId = isFree ? deviceDocId(deviceKey) : null;
+
   if (isFree) {
-    const snap = await db.collection("free_usage").doc(uid).get();
-    const state = freeWindowState(snap.exists ? snap.data() : null, now);
-    if (state.scansUsed >= FREE_SCANS_PER_WINDOW) {
+    const usage = await getFreeUsage(db, uid, deviceKey);
+    if (usage.freeScansUsed >= FREE_SCANS_PER_WINDOW) {
       throw gateError("resource-exhausted", "60101");
     }
   } else if (adNoFill) {
@@ -247,9 +279,11 @@ async function enforceAdGate(
 
   const ticketRef = db.collection("ad_tickets").doc(ticket);
   const usageRef = db.collection("free_usage").doc(uid);
+  const deviceRef = deviceId ? db.collection("free_usage_devices").doc(deviceId) : null;
   await db.runTransaction(async (tx) => {
     const tSnap = await tx.get(ticketRef);
     const uSnap = isFree ? await tx.get(usageRef) : null;
+    const dSnap = isFree && deviceRef ? await tx.get(deviceRef) : null;
     const t = tSnap.exists ? tSnap.data() : null;
     const claimAt = Date.now();
     if (
@@ -261,19 +295,25 @@ async function enforceAdGate(
       throw gateError("failed-precondition", "60102");
     }
     if (isFree) {
-      const state = freeWindowState(
+      const accountState = freeWindowState(
         uSnap.exists ? uSnap.data() : null,
         claimAt
       );
+      const deviceState = dSnap
+        ? freeWindowState(dSnap.exists ? dSnap.data() : null, claimAt)
+        : null;
+      const state = stricterWindow(accountState, deviceState);
       if (state.scansUsed >= FREE_SCANS_PER_WINDOW) {
         throw gateError("resource-exhausted", "60101");
       }
-      tx.set(usageRef, {
+      const claim = {
         windowStartMs: state.windowStartMs,
         scansUsed: state.scansUsed + 1,
         lastScanAtMs: claimAt,
         lastAdTicket: ticket,
-      });
+      };
+      tx.set(usageRef, claim);
+      if (deviceRef) tx.set(deviceRef, { ...claim, lastUid: uid });
     }
     tx.update(ticketRef, { consumedAtMs: claimAt });
   });

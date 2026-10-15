@@ -208,6 +208,9 @@ object ScanRepository {
                 // Client-generated ID for resumable scans.
                 put("clientRequestId", clientRequestId)
 
+                // Weekly free scan is counted per device as well as account.
+                DeviceKey.value?.let { put("deviceKey", it) }
+
                 // Ad-gate proof; the server verifies the ticket via SSV.
                 when (adProof) {
                     is AdProof.Ticket -> put("adTicket", adProof.adTicket)

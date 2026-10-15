@@ -92,8 +92,12 @@ object QuotaRepository {
         try {
             val idToken = AuthManager.currentIdToken() ?: return@withContext null
 
+            // The device key lets the badge show a free scan already used on
+            // this phone, even after app data was cleared.
             val payload = JSONObject().apply {
-                put("data", JSONObject())
+                put("data", JSONObject().apply {
+                    DeviceKey.value?.let { put("deviceKey", it) }
+                })
             }
             val requestBody = payload.toString()
                 .toRequestBody("application/json; charset=utf-8".toMediaType())

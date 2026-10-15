@@ -689,7 +689,7 @@ exports.getQuotaStatus = onCall(
     const result = await checkEntitlement(db, uid);
     if (result.tier === "free") {
       // Server-owned weekly free scan; the device's own count is display-only.
-      return { tier: "free", ...(await getFreeUsage(db, uid)) };
+      return { tier: "free", ...(await getFreeUsage(db, uid, (request.data || {}).deviceKey)) };
     }
     const remaining = Math.max(0, (result.scansAllowed || 0) - (result.scansUsed || 0));
 
