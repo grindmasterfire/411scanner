@@ -201,10 +201,28 @@ internal fun isInspectableTechnicalSource(
         return false
     }
 
-    return !(
+    // Reject Google grounding redirects (internal, not user-facing).
+    if (
         host == "vertexaisearch.cloud.google.com" &&
         uri.path.orEmpty()
             .lowercase()
             .startsWith("/grounding-api-redirect/")
-    )
+    ) {
+        return false
+    }
+
+    // Reject file downloads — Inspect Source opens web pages, not files.
+    // 2026-10-14: Inspect Source was triggering APK downloads because a receipt
+    // carried a storage.googleapis.com APK URL as its source_url.
+    val path = uri.path.orEmpty().lowercase()
+    val fileExtensions = listOf(".apk", ".pdf", ".zip", ".exe", ".dmg", ".msi", ".aab")
+    if (fileExtensions.any { path.endsWith(it) }) {
+        return false
+    }
+    // Reject our own APK distribution bucket — never a valid evidence source.
+    if (host == "storage.googleapis.com" && path.contains("scanner-4ea67-apks")) {
+        return false
+    }
+
+    return true
 }
