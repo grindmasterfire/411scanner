@@ -68,8 +68,21 @@ object ScanReportSectionParser {
             tagline = card.optString("tagline", ""),
             essential411 = card.optString("essential_411", ""),
             secondaryTargetsNote = card.optString("secondary_targets_note", ""),
-            infrastructureException = parseInfrastructureException(card)
+            infrastructureException = parseInfrastructureException(card),
+            reportDestinations = parseReportDestinations(card)
         )
+    }
+
+    /** The server's reporting doors; https pages only. */
+    fun parseReportDestinations(card: JSONObject): List<ReportDestination> {
+        val list = card.optJSONArray("report_destinations") ?: return emptyList()
+        return (0 until list.length()).mapNotNull { i ->
+            val d = list.optJSONObject(i) ?: return@mapNotNull null
+            val url = d.optString("url")
+            val label = d.optString("label")
+            if (!url.startsWith("https://") || label.isBlank()) null
+            else ReportDestination(d.optString("id"), label, url, d.optString("why"))
+        }
     }
 
     /** Only a confirmed exception that actually changed the meter is shown. */

@@ -13,6 +13,9 @@
  *   Never applies to a possible impersonator: not when a fraud or
  *   impersonation floor raiser fired, and not when the target points to a
  *   domain that is not the entity's own (app stores excepted).
+ *   Watchlisted entries (`watch`, ./watchlist.js) let historical or
+ *   disputed impersonation stand as findings without blocking; adjudicated
+ *   impersonation still blocks (owner ruling 2026-10-16, UAC).
  * @owner_context 411 Scanner policy ruling 2026-10-14 (The D&B Dilemma):
  *   necessity changes the action, not the facts.
  *
@@ -23,6 +26,7 @@
  */
 
 const CONFIG = require("./config/requiredInfrastructure.json");
+const { ADJUDICATED, watchVerdict } = require("./watchlist");
 
 function normalize(text) {
   return ` ${String(text || "")
@@ -68,10 +72,11 @@ function hostsIn(text) {
 }
 
 /** Why this card cannot get the exception, or null if it can. */
-function impersonationRisk(card, report, entry) {
+function impersonationRisk(card, report, entry, watch = null) {
   const raisers = card.floor_raisers || {};
-  const fired = BLOCKING_FLOOR_RAISERS.find((name) => raisers[name] === true);
-  if (fired) return `floor_raiser:${fired}`;
+  const ignored = watch ? watch.seen.filter((name) => !watch.retriggered.includes(name)) : [];
+  const fired = BLOCKING_FLOOR_RAISERS.find((name) => raisers[name] === true && !ignored.includes(name));
+  if (fired) return watch && watch.retriggered.includes(fired) ? `watchlist_retrigger:${fired}` : `floor_raiser:${fired}`;
   const own = (entry.domains || []).map((d) => d.toLowerCase());
   const hosts = [
     ...hostsIn(card.interface_surface),
@@ -95,11 +100,16 @@ function applyRequiredInfrastructure(result, { getVerdict, entries = CONFIG.entr
   const entry = matchRequiredInfrastructure(card, entries);
   if (!entry) return null;
 
-  const risk = impersonationRisk(card, result?.report, entry);
+  const watch = entry.watch ? watchVerdict(card, entry) : null;
+  const watchNote = watch && watch.seen.length
+    ? { watch: { seen: watch.seen, retriggered: watch.retriggered, evidence: watch.evidence } }
+    : {};
+  const risk = impersonationRisk(card, result?.report, entry, watch);
   if (risk) {
-    // Looks like the entity's name on someone else's offer: score as is.
-    card.required_infrastructure = { status: "blocked", id: entry.id, entity: entry.entity, reason: risk };
-    return { status: "blocked", entity: entry.entity, applied: false, reason: risk };
+    // Looks like the entity's name on someone else's offer, or a
+    // watchlisted entity's impersonation was adjudicated: score as is.
+    card.required_infrastructure = { status: "blocked", id: entry.id, entity: entry.entity, reason: risk, ...watchNote };
+    return { status: "blocked", entity: entry.entity, applied: false, reason: risk, ...watchNote };
   }
 
   const original = Number(card.action_meter_score);
@@ -119,11 +129,13 @@ function applyRequiredInfrastructure(result, { getVerdict, entries = CONFIG.entr
     evidence_based_score: Number.isFinite(original) ? original : null,
     evidence_based_verdict: originalLabel,
     instructions: entry.instructions,
+    ...watchNote,
   };
-  return { status: "confirmed", entity: entry.entity, applied };
+  return { status: "confirmed", entity: entry.entity, applied, ...watchNote };
 }
 
 module.exports = {
+  ADJUDICATED,
   applyRequiredInfrastructure,
   matchRequiredInfrastructure,
   REQUIRED_INFRASTRUCTURE_ENTRIES: CONFIG.entries,

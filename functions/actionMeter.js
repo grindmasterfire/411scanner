@@ -274,16 +274,19 @@ function getVerdict(score) {
     MASTER_CALIBRATION_RULER
       .actionMeterBands;
 
+  // A band runs from its min up to the next band's min, so two-decimal
+  // manual entries (UAC 8.49, 2026-10-16) land in the band they sit in,
+  // not in the gap between "8.4" and "8.5". One-decimal scores are unchanged.
   const matchedBand =
     bands.find(
-      (band) =>
+      (band, i) =>
         score >= band.min &&
         (
-          band.max === null ||
-          score <= band.max
+          i === bands.length - 1 ||
+          score < bands[i + 1].min
         )
     ) ||
-    bands[bands.length - 1];
+    bands[0];
 
   return {
     badge:

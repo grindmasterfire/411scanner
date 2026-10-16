@@ -41,7 +41,17 @@ data class ConsumerCard(
     val essential411: String = "",
     val secondaryTargetsNote: String = "",
     /** Set when a required-infrastructure exception capped the meter. */
-    val infrastructureException: InfrastructureException? = null
+    val infrastructureException: InfrastructureException? = null,
+    /** Where this violation gets reported, chosen by the server (8.5+). */
+    val reportDestinations: List<ReportDestination> = emptyList()
+)
+
+/** One reporting door (fire 2026-10-16): an official agency or platform page. */
+data class ReportDestination(
+    val id: String,
+    val label: String,
+    val url: String,
+    val why: String
 )
 
 /**

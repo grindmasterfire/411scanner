@@ -26,34 +26,35 @@ const { traceCall } = require("./incidentTrace");
  */
 const DEEP_DIVE_SYSTEM_PROMPT = `You are the 411 Scanner Deep Dive investigator.
 
-A base scan has already been completed on a target. You are given that base report for context ONLY. Your job is to perform fresh web research with Google Search and report ONLY what is new.
+A base scan has already been completed on a target. Deep Dive is NOT a re-scan. It is a targeted follow-up investigation into ONE specific finding from the base scan, named below as THE FINDING TO INVESTIGATE. The base report is context ONLY. Investigate that one finding and nothing else.
 
 RULES
 
-1. Do not restate, reword, or summarize anything the base report already covers. The user has already read it. Repeating it is a failure.
-2. Present only NEW findings from fresh research: specific complaint quotes, regulatory actions, enforcement records, court cases, forum and Reddit threads, fee schedules, payout terms, contract and terms-of-service language found online.
-3. Every factual claim must cite a source found in this research, named by its page title or site name. Do not write URLs anywhere; the source links are attached from the search results automatically. No unsourced assertions. If you cannot source a claim, leave it out.
-4. Do not rely on prior model knowledge for facts. If a fact did not come from this research, do not state it.
-5. Do not re-score the target, recalculate any risk score, or restate the verdict.
-6. If the research turns up nothing new, say exactly: "No new findings beyond the base report."
+1. Investigate ONLY the finding you are given. Do not describe, profile, or evaluate the target as a whole. Anything that does not bear on that finding stays out.
+2. Do fresh research with Google Search aimed at the specific question the finding raises. Aim for 10 to 15 sources that speak directly to it.
+3. Never re-run the 6-factor analysis. Never restate the Essential 411. Never recalculate, re-score, or restate the score or the verdict. Do not restate, reword, or summarize what the base report already says.
+4. Every factual claim must cite a source found in this research, named by its page title or site name. Never write a URL anywhere. The source links are attached from the search results automatically. No unsourced assertions. If you cannot source a claim, leave it out.
+5. Do not rely on prior model knowledge for facts. If a fact did not come from this research, do not state it.
+6. When a specimen wraps a real person's identity or a real brand around the scammer's own banking or marketing details, that is impersonation — a scam. A real name, photo, or brand on the surface does not make the operation legitimate.
+7. If the research turns up nothing new on the finding, say exactly: "We investigated [the finding] thoroughly and found no additional evidence beyond the base scan." with the finding named in place of the brackets.
 
 FORMAT
 
-Use these four sections in this order. Write each label on its own line, in capitals, exactly as shown, with no markdown symbols:
+Use exactly these four sections in this order. Write each label on its own line, in capitals, exactly as shown, with no markdown symbols:
 
-FINDING
-One or two sentences naming the specific question you investigated. Choose the single most consequential open question the base report raises. Do not recap the base report.
+THE FINDING
+One paragraph: what the base scan flagged, the finding you were given, and the specific question you investigated about it.
 
-INVESTIGATION
-The new evidence, as plain narrative prose. Quote complaints and terms directly where you found them.
+THE INVESTIGATION
+What the research found on that question, as plain narrative prose. Quote complaints, terms, and records directly where you found them.
 
-TIMELINE
-When the new evidence appeared and how it has evolved, with dates.
+THE TIMELINE
+When this started and how it has evolved, with dates.
 
-OPTIONS
-What the user can concretely do, grounded in the evidence you found: verification steps, recourse channels, regulators to contact, alternatives.
+YOUR OPTIONS
+What the user can concretely do about this finding, grounded in the evidence you found: verification steps, recourse channels, regulators to contact, alternatives.
 
-Do not write a SOURCES section. It is added from the search results.
+Never write a SOURCES section. It is added from the search results.
 
 STYLE
 
@@ -146,7 +147,7 @@ const SEARCH_SYSTEM_PROMPT =
   "Use Google Search before you answer. Report only what the search " +
   "results say, naming the source of each fact.";
 
-function searchRequest(report, targetName, patternMode) {
+function searchRequest(report, targetName, patternMode, finding) {
   const identity = report.solicitationIdentity || {};
   const pattern = report.solicitationPattern || {};
   if (patternMode) {
@@ -156,7 +157,27 @@ function searchRequest(report, targetName, patternMode) {
   }
   const who = [targetName, identity.operator, identity.destination_domain]
     .filter(Boolean).join(", ").slice(0, 300);
-  return `Research ${who}: consumer complaints, regulatory or enforcement actions, court cases, forum and Reddit threads, fees, payout and contract terms.`;
+  return `Investigate one specific finding about ${who}. The finding: ${finding.findingText}\nFind 10 to 15 sources that speak directly to this finding: records, complaints, terms, filings, and reporting on exactly this question. Do not research the target in general.`;
+}
+
+/** The writing pass's user prompt: the one finding, then the base report as context. */
+function buildDeepDivePrompt({ originalReport, targetName, finding, patternMode, priorFile, findings }) {
+  const priorBlock = priorFile && priorFile.text
+    ? `\n\nThe 411 Cache Bank already has a file on this pattern (from ${Number(priorFile.diveCount) || 1} earlier Deep Dive(s)). Start from it, verify it against today's search results, and add what is new:\n${String(priorFile.text).slice(0, 12000)}`
+    : "";
+
+  const findingsBlock = findings
+    ? `\n\nLIVE SEARCH FINDINGS (Google Search results gathered moments ago):\n${findings}\n\nWrite the Deep Dive from these live findings. Run more Google searches for anything they do not cover.`
+    : "\n\nNo live search findings came back. Run Google Search now; write only what that research supports, and say plainly if it found nothing.";
+
+  const findingBlock = patternMode
+    ? ""
+    : `\n\nTHE FINDING TO INVESTIGATE (the only subject of this Deep Dive):\n${finding.findingText}`;
+
+  return `Target: "${targetName}"${findingBlock}
+
+Base report (context only; do not restate any of it):
+${JSON.stringify(originalReport)}${priorBlock}${findingsBlock}`;
 }
 
 function searchDirective(attempt) {
@@ -177,13 +198,20 @@ function addUsage(total, response) {
 /**
  * @param options.patternMode research the scam pattern, not an operator
  * @param options.priorFile the Cache Bank's existing file on this pattern
+ * @param options.finding { findingId, findingText } the one finding a narrow dive investigates
  */
 async function generateDeepDive(
   apiKey,
   originalReport,
   targetName,
-  { patternMode = false, priorFile = null } = {}
+  { patternMode = false, priorFile = null, finding = null } = {}
 ) {
+  if (!patternMode && !(finding && finding.findingText)) {
+    throw new HttpsError(
+      "invalid-argument",
+      "A Deep Dive investigates one specific finding."
+    );
+  }
   if (!apiKey) {
     throw new HttpsError(
       "failed-precondition",
@@ -202,7 +230,7 @@ async function generateDeepDive(
     tools: [{ googleSearch: {} }],
     generationConfig: { temperature: 1.0, maxOutputTokens: 4096 },
   });
-  const request = searchRequest(originalReport || {}, targetName, patternMode);
+  const request = searchRequest(originalReport || {}, targetName, patternMode, finding);
   let searchResponse = null;
   for (let attempt = 1; attempt <= MAX_SEARCH_ATTEMPTS; attempt++) {
     const searchParts = [request, searchDirective(attempt)];
@@ -226,18 +254,9 @@ async function generateDeepDive(
     }
   });
 
-  const priorBlock = priorFile && priorFile.text
-    ? `\n\nThe 411 Cache Bank already has a file on this pattern (from ${Number(priorFile.diveCount) || 1} earlier Deep Dive(s)). Start from it, verify it against today's search results, and add what is new:\n${String(priorFile.text).slice(0, 12000)}`
-    : "";
-
-  const findingsBlock = findings
-    ? `\n\nLIVE SEARCH FINDINGS (Google Search results gathered moments ago):\n${findings}\n\nWrite the Deep Dive from these live findings. Run more Google searches for anything they do not cover.`
-    : "\n\nNo live search findings came back. Run Google Search now; write only what that research supports, and say plainly if it found nothing.";
-
-  const prompt = `Target: "${targetName}"
-
-Base report (context only; do not restate any of it):
-${JSON.stringify(originalReport)}${priorBlock}${findingsBlock}`;
+  const prompt = buildDeepDivePrompt({
+    originalReport, targetName, finding, patternMode, priorFile, findings,
+  });
 
   const result = await model.generateContent(prompt);
   traceCall(trace, { model, pass: patternMode ? "deep_dive_pattern" : "deep_dive", parts: [prompt], response: result.response });
@@ -246,6 +265,8 @@ ${JSON.stringify(originalReport)}${priorBlock}${findingsBlock}`;
   const telemetry = {
     operation: patternMode ? "deep_dive_pattern" : "deep_dive",
     deepDiveStandard: DEEP_DIVE_STANDARD,
+    findingId: finding ? finding.findingId : null,
+    findingSource: finding ? finding.source || null : null,
     model: DEEP_DIVE_MODEL,
     promptTokenCount: usage.promptTokenCount || 0,
     candidatesTokenCount: usage.candidatesTokenCount || 0,
@@ -275,6 +296,9 @@ ${JSON.stringify(originalReport)}${priorBlock}${findingsBlock}`;
 }
 
 module.exports = {
+  DEEP_DIVE_SYSTEM_PROMPT,
+  buildDeepDivePrompt,
   generateDeepDive,
+  searchRequest,
   withGroundedSources,
 };

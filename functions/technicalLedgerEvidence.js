@@ -553,6 +553,7 @@ async function normalizeTechnicalEvidence(report, groundingInput = []) {
 }
 
 module.exports = {
+  reasonTemplate,
   normalizeEvidenceReceipt,
   companyContext,
   independenceProblem,

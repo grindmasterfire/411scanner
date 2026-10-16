@@ -87,6 +87,7 @@ class MainActivity : ComponentActivity() {
          */
         ScanNotifications.ensureChannels(applicationContext)
         ScanJobScheduler.recoverOnAppOpen(applicationContext)
+        DeepDiveWorker.recoverOnAppOpen(applicationContext)
 
         setContent {
             MaterialTheme {

@@ -21,7 +21,10 @@ const { FieldValue } = require("firebase-admin/firestore");
 const COLLECTION = "pattern_files";
 const MAX_EXAMPLES = 25;
 
-const UNKNOWN_ACTOR = /^(|unknown|unidentified|n\/a|none|not established|unattributed)\b|unidentified|unknown (actor|sender|operator)|threat actor|compromised/i;
+// A blank operator is checked separately: an empty alternative here would
+// match the word boundary at the start of every name (it did until
+// 2026-10-16, sending named operators like Universal AdCom to pattern mode).
+const UNKNOWN_ACTOR = /^(unknown|unidentified|n\/a|none|not established|unattributed)\b|unidentified|unknown (actor|sender|operator)|threat actor|compromised/i;
 
 function slug(value) {
   return String(value || "")
@@ -32,18 +35,27 @@ function slug(value) {
     .slice(0, 80);
 }
 
+// Only 8.0+ means deception (scoring prompt); below it there is no scam
+// pattern to research, whatever the identity confidence.
+const PATTERN_MIN_SCORE = 8.0;
+
 /**
- * A report whose actor can't be named: the useful intelligence is the
- * scam pattern, not "the company".
+ * A scam report whose actor can't be named: the useful intelligence is the
+ * scam pattern, not "the company". A legitimate report with low identity
+ * confidence (a print flyer with no digital footprint) is not a pattern
+ * target (fire 2026-10-16).
  */
 function isPatternTarget(report) {
   const identity = (report && report.solicitation_identity) || {};
   const confidence = String(identity.confidence || "").toLowerCase();
-  return (
+  const operator = String(identity.operator || "").trim();
+  const unnameable =
     confidence === "pattern_only" ||
     confidence === "unknown" ||
-    UNKNOWN_ACTOR.test(String(identity.operator || "").trim())
-  );
+    !operator ||
+    UNKNOWN_ACTOR.test(operator);
+  const score = Number(report && report.consumer_card && report.consumer_card.action_meter_score);
+  return unnameable && Number.isFinite(score) && score >= PATTERN_MIN_SCORE;
 }
 
 /** One file per campaign: pattern type + campaign name. */

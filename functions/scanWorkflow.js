@@ -73,6 +73,10 @@ const {
 } = require("./entitlementStore");
 const { enforceAdGate, releaseAdGate } = require("./adGate");
 const { recordScanEvent, researchQuality } = require("./scanDeliveryEvents");
+const { attackClientView, scanForInjection, injectionNotice, applyRegulatoryClaimCap, applyAttackFloor, isAttackReport, isPureInjection } = require("./redTeamGuards");
+const { applyReportDestinations } = require("./reportDestinations");
+const { scrubStateCodes } = require("./registryLedger");
+const { reasonTemplate } = require("./technicalLedgerEvidence");
 const { applyRequiredInfrastructure } = require("./requiredInfrastructure");
 const { getVerdict } = require("./actionMeter");
 
@@ -158,9 +162,16 @@ function impersonatedDomains(report, linkEvidence) {
   const pattern = (report && report.solicitation_pattern) || {};
   const card = (report && report.consumer_card) || {};
   const faked = new Set();
-  const signals = [identity.canonical_name, pattern.solicitation_type, ...(card.classification_badges || []), ...(pattern.behavioral_signals || [])]
+  const signals = [identity.canonical_name, pattern.solicitation_type, ...(pattern.behavioral_signals || [])]
     .join(" ").toLowerCase();
-  if (!/impersonat|spoof|brand (mimic|abuse)|display name claims a brand|look-?alike/.test(signals)) return faked;
+  // Badges count only when they name a FAKED BRAND. "Civic Impersonation
+  // Alerts" (UAC 4u, 2026-10-16) describes the operator's conduct, not a
+  // spoofed site: it marked UAC's own uac4u.com as a faked brand, so the
+  // registry was never measured and the model filled the dates with
+  // "searched_redacted".
+  const badges = (card.classification_badges || []).join(" ").toLowerCase();
+  const fakedBrandBadge = /brand[ -]impersonat|spoof|brand (mimic|abuse)|look-?alike/.test(badges);
+  if (!fakedBrandBadge && !/impersonat|spoof|brand (mimic|abuse)|display name claims a brand|look-?alike/.test(signals)) return faked;
   for (const d of attribution.related_domains || []) if (cleanHost(d).includes(".")) faked.add(cleanHost(d));
   const actual = new Set(
     [identity.sender_is_free_mail ? null : identity.sender_domain,
@@ -272,6 +283,13 @@ async function executeScan(
     chargedVia: null,
     quality: null,
     infrastructure: null,
+    probeStatus: null,
+    ledgerScrubbed: [],
+    reportDoors: [],
+    injectionFlag: null,
+    regulatoryClaimCap: null,
+    attackFloor: false,
+    attackView: null,
   };
   const recordCompletion = (outcome) =>
     recordScanEvent(db, "completed", {
@@ -303,6 +321,16 @@ async function executeScan(
         tier: scanFacts.tier || null,
         charged: scanFacts.charged,
         chargedVia: scanFacts.chargedVia,
+        // Exception / watchlist outcome, for `business-center.js raisers`.
+        infrastructure: scanFacts.infrastructure || null,
+        // Ledger hygiene, for `business-center.js ledger`.
+        probeStatus: scanFacts.probeStatus || null,
+        ledgerScrubbed: scanFacts.ledgerScrubbed || [],
+        reportDoors: scanFacts.reportDoors || [],
+        injectionFlag: scanFacts.injectionFlag || null,
+        regulatoryClaimCap: scanFacts.regulatoryClaimCap || null,
+        attackFloor: scanFacts.attackFloor || false,
+        attackView: scanFacts.attackView || null,
       },
     });
 
@@ -595,6 +623,10 @@ async function executeScan(
     );
   }
 
+  // Red-team #4: flag (never block) text aimed at the scanner.
+  const injectionScan = scanForInjection(ocrText);
+  scanFacts.injectionFlag = injectionScan.flagged ? injectionScan : null;
+
   /*
    * A grounding-rejected response already consumed provider resources.
    * Record that real cost, but do not let the rejected response become
@@ -608,7 +640,8 @@ async function executeScan(
         apiKey,
         imageBase64,
         mimeType,
-        prompt,
+        // Red-team #4: flagged screenshot text is named as content, never obeyed.
+        prompt + injectionNotice(injectionScan),
         historicalContext.evidencePacket,
         linkEvidence,
         probe
@@ -678,6 +711,11 @@ async function executeScan(
 
   // Deterministic redirect-path evidence (governance write).
   applyRedirectPath(report, linkEvidence);
+  // Red-team #7: a recorded false regulatory claim caps Honest Business Model.
+  scanFacts.regulatoryClaimCap = applyRegulatoryClaimCap(report) || null;
+  // A pure attack never shows as safe, whatever score it demanded.
+  scanFacts.attackFloor = applyAttackFloor(report, getVerdict);
+  scanFacts.attackView = isAttackReport(report) ? (isPureInjection(report) ? "pure" : "hybrid") : null;
   // Email screenshots: sender read from the screenshot text, never the model.
   applyEmailSender(report, ocrText, caller.email);
 
@@ -736,6 +774,7 @@ async function executeScan(
     }
   }
   telemetry.probe_status = probeStatus;
+  scanFacts.probeStatus = probeStatus;
 
   /*
    * Guard: Abort truly unidentifiable scans before billing and persistence.
@@ -873,6 +912,11 @@ async function executeScan(
    * entry was added still gets it. Findings are untouched.
    */
   relabelVerdict(__result);
+  // No status code ever ships as a value ("searched_redacted" as a date):
+  // empty value + a sentence saying why. Cached reports included.
+  if (__result && __result.report) scanFacts.ledgerScrubbed = scrubStateCodes(__result.report, reasonTemplate);
+  // Report button doors, by what the report found (cached reports too).
+  if (__result && __result.report) scanFacts.reportDoors = applyReportDestinations(__result.report);
   scanFacts.infrastructure = applyRequiredInfrastructure(__result, { getVerdict });
 
   // Resumable scans: every delivered path, cache hits included.
@@ -995,7 +1039,8 @@ function replayScanRequest(existing, uid) {
  */
 function clientView(result) {
   if (!result || !result.report) return result;
-  const report = { ...result.report };
+  // Red-team #2/#3: attacks are shown as attacks (the ledger keeps everything).
+  const report = attackClientView({ ...result.report });
   const ri = report.consumer_card?.required_infrastructure;
   if (ri) {
     report.consumer_card = {
@@ -1040,6 +1085,7 @@ module.exports = {
   _scanFailureOutcome: scanFailureOutcome,
   _claimScanRequest: claimScanRequest,
   _relabelVerdict: relabelVerdict,
+  _clientView: clientView,
   _clientView: clientView,
   _replayScanRequest: replayScanRequest,
   SCAN_CLAIM_STALE_MS,

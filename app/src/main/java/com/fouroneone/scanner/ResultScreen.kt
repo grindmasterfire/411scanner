@@ -47,7 +47,12 @@ fun ResultScreen(
     report: ScanReport,
     onBackClick: () -> Unit,
     savedDeepDive: String? = null,
-    onRequestDeepDive: (suspend () -> String?)? = null
+    deepDiveRunning: Boolean = false,
+    deepDiveFailure: String? = null,
+    topUpCreditsLeft: Int? = null,
+    deepDiveUnlimited: Boolean = false,
+    onRequestDeepDive: (() -> Unit)? = null,
+    onDismissDeepDiveFailure: () -> Unit = {}
 ) {
     var selectedTabIndex by remember { mutableIntStateOf(0) }
     val tabs = listOf("Consumer Card", "Technical Ledger", "Alternatives")
@@ -125,7 +130,12 @@ fun ResultScreen(
                 0 -> ConsumerCardTab(
                     consumerCard = report.consumerCard,
                     savedDeepDive = savedDeepDive,
-                    onRequestDeepDive = onRequestDeepDive
+                    deepDiveRunning = deepDiveRunning,
+                    deepDiveFailure = deepDiveFailure,
+                    topUpCreditsLeft = topUpCreditsLeft,
+                    deepDiveUnlimited = deepDiveUnlimited,
+                    onRequestDeepDive = onRequestDeepDive,
+                    onDismissDeepDiveFailure = onDismissDeepDiveFailure
                 )
 
                 1 -> TechnicalLedgerTab(

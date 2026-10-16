@@ -8,6 +8,8 @@
  * @owner_context 411 Scanner server-owned Action Meter Floor-Raiser governance.
  */
 
+const { describesNameChange } = require("./rebrandEvidence");
+
 /**
  * Returns true only when an evidence bucket contains at least
  * one non-empty evidence statement.
@@ -40,9 +42,11 @@ function extractFloorRaisers(parsedData) {
     card.floor_raiser_evidence || {};
 
   return {
+    // Backstop (2026-10-16): a rebrand is a name CHANGE, not side brands.
     rebrandPattern:
       source.rebrand_pattern === true &&
-      hasEvidence(evidence.rebrand_pattern),
+      hasEvidence(evidence.rebrand_pattern) &&
+      describesNameChange(evidence.rebrand_pattern),
 
     advanceFee:
       source.advance_fee === true &&

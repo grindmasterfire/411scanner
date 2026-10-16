@@ -38,10 +38,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 
 object ScanNotifications {
 
-    private const val CHANNEL_PROGRESS = "scan_progress"
+    internal const val CHANNEL_PROGRESS = "scan_progress"
     private const val CHANNEL_RESULT = "scan_result"
-    private const val KIND_PROGRESS = 1
-    private const val KIND_RESULT = 2
+    internal const val KIND_PROGRESS = 1
+    internal const val KIND_RESULT = 2
     private const val KIND_WAITING = 3
 
     const val WAITING_TEXT = "We'll notify you when your report's ready."
@@ -56,7 +56,7 @@ object ScanNotifications {
     val openRequests = MutableStateFlow<String?>(null)
 
     /* Stable per-scan notification ID; the kind keeps a scan's three apart. */
-    private fun notificationId(kind: Int, requestId: String) =
+    internal fun notificationId(kind: Int, requestId: String) =
         kind * 0x100000 + (requestId.hashCode() and 0xFFFFF)
 
     fun ensureChannels(context: Context) {
@@ -149,7 +149,7 @@ object ScanNotifications {
             .forEach { manager.cancel(notificationId(it, requestId)) }
     }
 
-    private fun postResult(context: Context, requestId: String, title: String, text: String) {
+    internal fun postResult(context: Context, requestId: String, title: String, text: String) {
         ensureChannels(context)
         if (!canPost(context)) {
             AppLog.event("notify") { "result notification blocked (permission off)" }
@@ -171,7 +171,7 @@ object ScanNotifications {
         }
     }
 
-    private fun canPost(context: Context): Boolean {
+    internal fun canPost(context: Context): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
@@ -182,7 +182,7 @@ object ScanNotifications {
     // Brings MainActivity forward carrying the scan, so the screen opens
     // that scan's report. One PendingIntent per scan (request code), or
     // every notification would share the latest scan's extra.
-    private fun openScanner(context: Context, requestId: String): PendingIntent {
+    internal fun openScanner(context: Context, requestId: String): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                 Intent.FLAG_ACTIVITY_CLEAR_TOP or

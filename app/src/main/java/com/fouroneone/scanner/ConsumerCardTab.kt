@@ -13,7 +13,6 @@
 
 package com.fouroneone.scanner
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,8 +29,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -39,11 +38,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,7 +50,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.launch
 
 /**
  * Consumer-facing report surface.
@@ -64,7 +62,17 @@ fun ConsumerCardTab(
     consumerCard: ConsumerCard?,
     /** A Deep Dive already bought for this report: shown without a new charge. */
     savedDeepDive: String? = null,
-    onRequestDeepDive: (suspend () -> String?)? = null
+    /** A Deep Dive for this report is running in the background. */
+    deepDiveRunning: Boolean = false,
+    /** Why the last background Deep Dive couldn't finish (shown once). */
+    deepDiveFailure: String? = null,
+    /** Top-up credits left (server); null when not known yet. */
+    topUpCreditsLeft: Int? = null,
+    /** Tester account: Deep Dives are never charged. */
+    deepDiveUnlimited: Boolean = false,
+    /** Start a Deep Dive in the background (after the user confirmed the credit). */
+    onRequestDeepDive: (() -> Unit)? = null,
+    onDismissDeepDiveFailure: () -> Unit = {}
 ) {
     if (consumerCard == null) {
         Box(
@@ -79,11 +87,33 @@ fun ConsumerCardTab(
         return
     }
 
-    var isExpanded by remember { mutableStateOf(false) }
-    var deepDiveText by remember(savedDeepDive) { mutableStateOf(savedDeepDive) }
-    var isLoadingDeepDive by remember { mutableStateOf(false) }
-    var deepDiveError by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
+    var showDiveConfirm by remember { mutableStateOf(false) }
+    val hasDive = !savedDeepDive.isNullOrBlank()
+
+    // Every Deep Dive, first or re-dive, is a confirmed 1-credit spend.
+    if (showDiveConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDiveConfirm = false },
+            title = { Text(deepDiveConfirmTitle(hasDive)) },
+            text = { Text(deepDiveCostLine(hasDive, topUpCreditsLeft, deepDiveUnlimited)) },
+            confirmButton = {
+                if (canRunDeepDive(topUpCreditsLeft, deepDiveUnlimited)) {
+                    Button(onClick = {
+                        showDiveConfirm = false
+                        onRequestDeepDive?.invoke()
+                    }) { Text("Run") }
+                } else {
+                    // No credit: nothing to confirm, just say so.
+                    Button(onClick = { showDiveConfirm = false }) { Text("OK") }
+                }
+            },
+            dismissButton = {
+                if (canRunDeepDive(topUpCreditsLeft, deepDiveUnlimited)) {
+                    TextButton(onClick = { showDiveConfirm = false }) { Text("Cancel") }
+                }
+            }
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -207,8 +237,10 @@ fun ConsumerCardTab(
         }
 
         /*
-         * Deep Dive remains unchanged in this regression cleanup.
-         * Product/credit decisions are deferred until the final V1 task.
+         * Deep Dive (fire 2026-10-16): one button. It reads "Would You Like
+         * To Know More?" until a Deep Dive exists, then "Re-dive for a new
+         * credit?" in the same place. Every tap asks before spending; the
+         * dive runs in the background and arrives by notification.
          */
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -224,92 +256,56 @@ fun ConsumerCardTab(
             Column(
                 modifier = Modifier.padding(12.dp)
             ) {
-                OutlinedButton(
-                    onClick = {
-                        if (!isExpanded) {
-                            if (
-                                deepDiveText == null &&
-                                onRequestDeepDive != null
-                            ) {
-                                isLoadingDeepDive = true
-                                deepDiveError = null
-
-                                scope.launch {
-                                    try {
-                                        deepDiveText =
-                                            onRequestDeepDive()
-                                        isExpanded = true
-                                    } catch (e: ScanFailureException) {
-                                        // e.g. 40201: no top-up credit.
-                                        deepDiveError =
-                                            "${e.message}\nReference code: ${e.code5}"
-                                    } finally {
-                                        isLoadingDeepDive = false
-                                    }
-                                }
-                            } else {
-                                isExpanded = true
-                            }
+                if (onRequestDeepDive != null) {
+                    OutlinedButton(
+                        onClick = {
+                            onDismissDeepDiveFailure()
+                            showDiveConfirm = true
+                        },
+                        // One at a time: a running dive can't be sent again.
+                        enabled = !deepDiveRunning,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = Color(0xFF6750A4)
+                        )
+                    ) {
+                        if (deepDiveRunning) {
+                            CircularProgressIndicator(
+                                modifier = Modifier
+                                    .width(16.dp)
+                                    .height(16.dp),
+                                color = Color(0xFF6750A4),
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
                         } else {
-                            isExpanded = false
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = Color(0xFF6750A4)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = Color(0xFF6750A4)
-                    )
-                ) {
-                    if (isLoadingDeepDive) {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .width(16.dp)
-                                .height(16.dp),
-                            color = Color(0xFF6750A4),
-                            strokeWidth = 2.dp
-                        )
-
-                        Spacer(modifier = Modifier.width(8.dp))
-
                         Text(
-                            text = "Loading Deep Dive...",
+                            text = deepDiveButtonLabel(hasDive, deepDiveRunning, topUpCreditsLeft, deepDiveUnlimited),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Info,
-                            contentDescription = null,
-                            tint = Color(0xFF6750A4)
-                        )
-
-                        Spacer(modifier = Modifier.width(8.dp))
-
-                        Text(
-                            text = if (isExpanded) {
-                                "Hide Deep Dive"
-                            } else {
-                                "Would You Like To Know More?"
-                            },
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        Spacer(modifier = Modifier.weight(1f))
-
-                        Icon(
-                            imageVector = if (isExpanded) {
-                                Icons.Default.KeyboardArrowUp
-                            } else {
-                                Icons.Default.KeyboardArrowDown
-                            },
-                            contentDescription = null,
-                            tint = Color(0xFF6750A4)
                         )
                     }
                 }
 
-                deepDiveError?.let { err ->
+                if (deepDiveRunning) {
+                    Text(
+                        text = DEEP_DIVE_RUNNING_NOTE,
+                        modifier = Modifier.padding(top = 8.dp),
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
+                        color = Color(0xFF5E5970)
+                    )
+                }
+
+                deepDiveFailure?.let { err ->
                     Text(
                         text = err,
                         modifier = Modifier.padding(top = 8.dp),
@@ -319,11 +315,7 @@ fun ConsumerCardTab(
                     )
                 }
 
-                AnimatedVisibility(
-                    visible =
-                        isExpanded &&
-                            !deepDiveText.isNullOrBlank()
-                ) {
+                if (hasDive) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -343,7 +335,7 @@ fun ConsumerCardTab(
                         )
 
                         Text(
-                            text = deepDiveText ?: "",
+                            text = savedDeepDive ?: "",
                             fontSize = 12.sp,
                             lineHeight = 18.sp,
                             color = Color(0xFF49454F)
@@ -354,6 +346,49 @@ fun ConsumerCardTab(
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+internal const val DEEP_DIVE_RUNNING_NOTE =
+    "Your Deep Dive is running. We'll notify you when it's ready; you can leave the app."
+
+/** "(3 left)", "(unlimited)" for the tester, or nothing while unknown. */
+internal fun creditsTag(left: Int?, unlimited: Boolean): String = when {
+    unlimited -> " (unlimited)"
+    left == null -> ""
+    else -> " ($left left)"
+}
+
+/** The one Deep Dive button, in place: first dive, re-dive, or running. */
+internal fun deepDiveButtonLabel(
+    hasDive: Boolean,
+    running: Boolean,
+    left: Int? = null,
+    unlimited: Boolean = false
+): String = when {
+    running -> "Deep Dive running…"
+    hasDive -> "Re-dive for an additional credit?" + creditsTag(left, unlimited)
+    else -> "Would You Like To Know More?" + creditsTag(left, unlimited)
+}
+
+internal fun deepDiveConfirmTitle(hasDive: Boolean): String =
+    if (hasDive) "Run a new Deep Dive?" else "Run a Deep Dive?"
+
+/** False only when the server says the bank is empty (the tester is never charged). */
+internal fun canRunDeepDive(left: Int?, unlimited: Boolean): Boolean =
+    unlimited || left == null || left > 0
+
+private fun credits(n: Int) = if (n == 1) "1 top-up credit" else "$n top-up credits"
+
+/** The credit guard, on every dive (same as the scan confirmation). */
+internal fun deepDiveCostLine(hasDive: Boolean, left: Int? = null, unlimited: Boolean = false): String {
+    val same = if (hasDive) ", even if the new Deep Dive matches the one you have" else ""
+    return when {
+        unlimited -> "Tester account: this Deep Dive is not charged. Run it?"
+        left == null -> "You are about to use 1 top-up credit$same. Are you sure? Nothing is charged until you tap Run."
+        left <= 0 -> "You have no top-up credits left. A Deep Dive uses 1 top-up credit: add a top-up from Plans first."
+        else -> "You have ${credits(left)}. This Deep Dive uses 1$same, leaving ${left - 1}. " +
+            "Are you sure? Nothing is charged until you tap Run."
     }
 }
 

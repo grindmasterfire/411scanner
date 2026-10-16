@@ -27,6 +27,7 @@
 const crypto = require("crypto");
 const admin = require("firebase-admin");
 const { FieldValue } = require("firebase-admin/firestore");
+const { extractFloorRaisers } = require("./actionMeterFloorRaisers");
 
 const BUCKET = "scanner-4ea67-incidents";
 const COLLECTION = "incidents";
@@ -70,6 +71,23 @@ function tagIncident(report, failed) {
   if (score >= 8) return "scam";
   if (score < 4) return "legit";
   return "inconclusive";
+}
+
+/**
+ * Floor raisers the server accepted (true AND evidenced), each with its
+ * evidence, for `business-center.js raisers`. { rebrand_pattern: "..." }
+ */
+function validatedFloorRaisers(report) {
+  const card = (report && report.consumer_card) || {};
+  const accepted = extractFloorRaisers(report || {});
+  const evidence = card.floor_raiser_evidence || {};
+  const out = {};
+  for (const [camel, ok] of Object.entries(accepted)) {
+    if (!ok) continue;
+    const name = camel.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+    out[name] = (evidence[name] || []).join(" ").slice(0, 600);
+  }
+  return out;
 }
 
 /**
@@ -138,6 +156,7 @@ async function writeIncident(db, {
       channel: identity.channel || null,
       solicitationType: report?.solicitation_pattern?.solicitation_type || null,
       failureCode5: failure?.code5 || null,
+      floorRaisers: kind === "scan" ? validatedFloorRaisers(report) : {},
       modelCalls: calls.length,
       searchQueries: calls.reduce((n, c) => n + (c.grounding?.queries?.length || 0), 0),
       specimen,
@@ -156,6 +175,7 @@ async function writeIncident(db, {
 }
 
 module.exports = {
+  validatedFloorRaisers,
   writeIncident,
   tagIncident,
   INCIDENT_BUCKET: BUCKET,

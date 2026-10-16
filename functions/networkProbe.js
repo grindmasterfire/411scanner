@@ -488,7 +488,14 @@ async function checkRdap(domain) {
         redacted: !identity || REDACTED_TEXT.test(identity),
       };
     }
-    return { ageDays, registrar: tidy(registrar), registrant };
+    // Registry dates are always public, even when the registrant is not.
+    const day = (action) => {
+      const e = (data.events || []).find((x) => x.eventAction === action && x.eventDate);
+      const t = e ? Date.parse(e.eventDate) : NaN;
+      return Number.isNaN(t) ? "" : new Date(t).toISOString().slice(0, 10);
+    };
+    const dates = { registered: day("registration"), updated: day("last changed"), expires: day("expiration") };
+    return { ageDays, registrar: tidy(registrar), registrant, dates };
   } catch (e) {
     return null;
   }
@@ -818,6 +825,7 @@ async function runNetworkProbe(linkEvidence, candidateDomain) {
       subdomains: subdomains,
       registrar: rdap ? rdap.registrar : "",
       registrant: rdap ? rdap.registrant : null,
+      registration_dates: rdap ? rdap.dates : null,
     };
   } catch (e) {
     return { measured: false, measured_at: stamp };
@@ -897,6 +905,8 @@ function probeContextBlock(probe) {
  * technical_ledger.network_telemetry and infrastructure.
  * Never touches grounding_sources — those belong to technicalLedgerEvidence.
  */
+const { applyRegistryValues } = require("./registryLedger");
+
 function applyMeasuredLedger(report, probe) {
   if (!report || !probe || !probe.measured) return report;
   const ledger = report.technical_ledger || (report.technical_ledger = {});
@@ -1070,6 +1080,8 @@ function applyMeasuredLedger(report, probe) {
   }
   // Registry record (RDAP): registrar and registrant, as the registry shows them.
   const icannLookup = `https://lookup.icann.org/en/lookup?name=${encodeURIComponent(apex)}`;
+  // Registry values (registrar, dates, registrant) replace the model's.
+  applyRegistryValues(report, probe, stampProbeReceipt, icannLookup);
   if (probe.registrar) {
     stampProbeReceipt(
       "domain_registration.registrar",

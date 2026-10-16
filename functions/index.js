@@ -73,6 +73,7 @@ async function asHttps(fn) {
 }
 
 const {
+  DEEP_DIVE_STANDARD,
   getCachedDeepDive,
   setCachedDeepDive,
 } = require("./deepDiveCacheLayer");
@@ -104,6 +105,14 @@ const {
   readPatternFile,
   filePattern,
 } = require("./patternFiles");
+const { resolveFinding } = require("./deepDiveFinding");
+const {
+  validRequestId,
+  claimDiveRequest,
+  finishDiveRequest,
+  replyForExisting,
+  failureOutcome,
+} = require("./deepDiveRequests");
 
 const {
   estimateGeminiTokenCost,
@@ -132,6 +141,7 @@ async function recordDeepDiveReceipt(
     cacheHit,
     telemetry = null,
     failureCode5 = null,
+    scope = null,
   }
 ) {
   try {
@@ -188,6 +198,9 @@ async function recordDeepDiveReceipt(
           usage.groundingRateVersion || null,
         failureCode5:
           failureCode5 || null,
+        // Deep Dive scope (2026-10-16): which finding, which mode, and the
+        // base score that routed it. Read by `business-center.js dives`.
+        ...(scope || {}),
       });
   } catch (error) {
     console.error(
@@ -257,6 +270,8 @@ exports.scan = onCall(
     region: "us-central1",
     timeoutSeconds: 300,
     memory: "1GiB",
+    // 10.7: the Gemini key comes from Secret Manager, never a plain env var.
+    secrets: ["GEMINI_API_KEY"],
   },
   async (request) =>
     (async () => {
@@ -287,13 +302,47 @@ exports.scan = onCall(
  * owns request validation and caching; deepDiveEngine.js owns model
  * execution.
  */
+/*
+ * Background Deep Dives (fire 2026-10-16): the app sends its own request ID
+ * and follows it from a background job. The ID is claimed before anything
+ * is charged; a repeat of it returns that dive's outcome (done / still
+ * running / failed), never a second dive or a second charge. Builds that
+ * send no request ID get the original behavior.
+ */
 exports.deepDive = onCall(
   {
     region: "us-central1",
-    timeoutSeconds: 120,
+    timeoutSeconds: 300,
     memory: "1GiB",
+    // 10.7: the Gemini key comes from Secret Manager, never a plain env var.
+    secrets: ["GEMINI_API_KEY"],
   },
   async (request) => {
+    const requestId = request.data && request.data.requestId;
+    if (!validRequestId(requestId)) return runDeepDive(request);
+    let uid = null;
+    try {
+      const h = (request.rawRequest && request.rawRequest.headers && request.rawRequest.headers.authorization) || "";
+      if (h.startsWith("Bearer ")) uid = (await admin.auth().verifyIdToken(h.slice(7))).uid;
+    } catch (e) { uid = null; }
+    // No account: nothing to claim (the credit gate refuses it anyway).
+    if (!uid) return runDeepDive(request);
+
+    const claim = await claimDiveRequest(db, uid, requestId);
+    if (claim.existing) return replyForExisting(claim.existing);
+    try {
+      const reply = await runDeepDive(request);
+      await finishDiveRequest(db, uid, requestId, { status: "done", text: reply.deepDive || "" });
+      return { ...reply, requestId, state: "done" };
+    } catch (error) {
+      await finishDiveRequest(db, uid, requestId, failureOutcome(error));
+      throw error;
+    }
+  }
+);
+
+async function runDeepDive(request) {
+  {
     // Deep dives spend top-up credits only — never subscription scans.
     // Gate at the top; the credit is deducted after input validation and
     // before any cache lookup or Gemini call, so malformed requests never
@@ -370,10 +419,49 @@ exports.deepDive = onCall(
     const requestId =
       createScanRequestId();
 
+    /*
+     * Deep Dive reasons from the completed report. The server's own copy
+     * (Cache Bank, by cacheKey) adds the identity and pattern the app's
+     * summary leaves out; an unnamed actor turns on the pattern Deep Dive,
+     * which starts from the Cache Bank's file on that pattern.
+     */
+    let fullReport = null;
+    try {
+      const entry = await db.collection("scan_cache").doc(cacheKey).get();
+      fullReport = entry.exists ? (entry.data() || {}).report || null : null;
+    } catch (e) {
+      console.warn("[deepDive] full report read failed:", e.message);
+    }
+    const patternMode = Boolean(fullReport) && isPatternTarget(fullReport);
+
+    // One finding per dive (DEEP_DIVE_SPEC.md): the client's pick, else the
+    // highest-risk finding in the report. A pattern dive's finding is the
+    // pattern itself.
+    const finding = patternMode
+      ? { findingId: "pattern", findingText: "", source: "pattern" }
+      : resolveFinding(data.finding, fullReport, originalReport || {});
+    const patternKey = patternMode ? patternKeyFor(fullReport) : null;
+    const priorFile = patternKey ? await readPatternFile(db, patternKey) : null;
+    const baseScore = Number(fullReport?.consumer_card?.action_meter_score);
+    const diveScope = {
+      deepDiveStandard: DEEP_DIVE_STANDARD,
+      cacheKey,
+      targetName: String(targetName).slice(0, 200),
+      patternMode,
+      baseScore: Number.isFinite(baseScore) ? baseScore : null,
+      operator: String(fullReport?.solicitation_identity?.operator || "").slice(0, 120),
+      identityConfidence: String(fullReport?.solicitation_identity?.confidence || ""),
+      findingId: finding.findingId,
+      findingSource: finding.source,
+      findingText: finding.findingText.slice(0, 300),
+    };
+
     const cachedDeepDive =
       await getCachedDeepDive(
         db,
-        cacheKey
+        cacheKey,
+        targetName,
+        finding.findingId
       );
 
     if (cachedDeepDive) {
@@ -383,6 +471,7 @@ exports.deepDive = onCall(
           requestId,
           uid,
           cacheHit: true,
+          scope: diveScope,
         }
       );
       return {
@@ -401,23 +490,6 @@ exports.deepDive = onCall(
         "Gemini API key is not configured."
       );
     }
-
-    /*
-     * Deep Dive reasons from the completed report. The server's own copy
-     * (Cache Bank, by cacheKey) adds the identity and pattern the app's
-     * summary leaves out; an unnamed actor turns on the pattern Deep Dive,
-     * which starts from the Cache Bank's file on that pattern.
-     */
-    let fullReport = null;
-    try {
-      const entry = await db.collection("scan_cache").doc(cacheKey).get();
-      fullReport = entry.exists ? (entry.data() || {}).report || null : null;
-    } catch (e) {
-      console.warn("[deepDive] full report read failed:", e.message);
-    }
-    const patternMode = Boolean(fullReport) && isPatternTarget(fullReport);
-    const patternKey = patternMode ? patternKeyFor(fullReport) : null;
-    const priorFile = patternKey ? await readPatternFile(db, patternKey) : null;
 
     const reportSummary = {
       ...(originalReport || {}),
@@ -438,7 +510,7 @@ exports.deepDive = onCall(
         apiKey,
         reportSummary,
         targetName,
-        { patternMode, priorFile }
+        { patternMode, priorFile, finding }
       ).catch(
         async (error) => {
           // The credit is already consumed; record the failure so the
@@ -450,6 +522,7 @@ exports.deepDive = onCall(
               uid,
               cacheHit: false,
               failureCode5: "70101",
+              scope: diveScope,
             }
           );
           throw error;
@@ -463,12 +536,15 @@ exports.deepDive = onCall(
         uid,
         cacheHit: false,
         telemetry,
+        scope: diveScope,
       }
     );
 
     await setCachedDeepDive(
       db,
       cacheKey,
+      targetName,
+      finding.findingId,
       text,
       telemetry
     );
@@ -479,7 +555,7 @@ exports.deepDive = onCall(
       requestId,
       uid,
       cacheKey,
-      report: { deepDive: text, patternMode, patternKey, telemetry },
+      report: { deepDive: text, patternMode, patternKey, finding, telemetry },
       trace,
       facts: { charged: true, chargedVia: "top_up" },
     });
@@ -496,7 +572,7 @@ exports.deepDive = onCall(
         text,
     };
   }
-);
+}
 
 /*
  * Grant a scan entitlement after a Play purchase.

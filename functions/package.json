@@ -13,6 +13,12 @@
   },
   "private": true,
   "scripts": {
+    "test": "node scripts/run-tests.js",
+    "business:dives": "node scripts/business-center.js dives",
+    "business:raisers": "node scripts/business-center.js raisers",
+    "business:ledger": "node scripts/business-center.js ledger",
+    "business:doors": "node scripts/business-center.js doors",
+    "business:redteam": "node scripts/business-center.js redteam",
     "qa:last": "node scripts/qa-last.js",
     "business:last": "node scripts/business-center.js last",
     "business:today": "node scripts/business-center.js today",

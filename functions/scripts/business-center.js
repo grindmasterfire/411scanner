@@ -28,6 +28,11 @@
  * node scripts/business-center.js refusals [7d]       search-refusal tracker
  * node scripts/business-center.js prepaid [month]     prepaid balances
  * node scripts/business-center.js quality [period]    research quality
+ * node scripts/business-center.js dives [period]      Deep Dive scope: finding, mode, violations
+ * node scripts/business-center.js raisers [period]    accepted floor raisers + evidence; rebrand check
+ * node scripts/business-center.js ledger [period]     probe outcomes; status codes scrubbed from values
+ * node scripts/business-center.js doors [period]      Report button doors offered; FTC-only gaps
+ * node scripts/business-center.js redteam [period]    attacks (pure/hybrid), flagged text, floors, caps
  * node scripts/business-center.js state [--out file]  JSON state for AI sessions
  *
  * Calendar periods use UTC deliberately so accounting boundaries do not

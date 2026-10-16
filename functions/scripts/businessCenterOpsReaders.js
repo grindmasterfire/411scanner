@@ -18,6 +18,11 @@ const { execFileSync } = require("child_process");
 const ops = require("../businessCenterOps");
 const { SCAN_DELIVERY_EVENTS_COLLECTION } = require("../scanDeliveryEvents");
 const { REVENUE_EVENTS_COLLECTION } = require("../revenueEvents");
+const { buildDeepDiveScopeSummary, formatDeepDiveScopeSummary } = require("../deepDiveScopeReport");
+const { buildFloorRaiserSummary, formatFloorRaiserSummary } = require("../floorRaiserReport");
+const { buildLedgerHygieneSummary, formatLedgerHygieneSummary } = require("../ledgerHygieneReport");
+const { buildReportDoorsSummary, formatReportDoorsSummary } = require("../reportDoorsReport");
+const { buildRedTeamSummary, formatRedTeamSummary } = require("../redTeamReport");
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -154,6 +159,40 @@ async function runOpsReport({ db, admin, projectId, getPeriodStart }, mode, args
     console.log(ops.formatResearchQualitySummary(ops.buildResearchQualitySummary(events), p.label));
     return true;
   }
+  if (mode === "dives") {
+    const p = resolvePeriod(args[0], getPeriodStart, "week");
+    const [dives, requestSnap] = await Promise.all([
+      byTimestamp(db, admin, "deepdive_receipts", "createdAt", p.sinceMs),
+      db.collection("deepdive_requests").where("createdAtMs", ">=", p.sinceMs).get(),
+    ]);
+    const requests = requestSnap.docs.map((d) => d.data());
+    console.log(formatDeepDiveScopeSummary(buildDeepDiveScopeSummary(dives, { requests }), p.label));
+    return true;
+  }
+  if (mode === "raisers") {
+    const p = resolvePeriod(args[0], getPeriodStart, "week");
+    const incidents = await byTimestamp(db, admin, "incidents", "createdAt", p.sinceMs);
+    console.log(formatFloorRaiserSummary(buildFloorRaiserSummary(incidents), p.label));
+    return true;
+  }
+  if (mode === "ledger") {
+    const p = resolvePeriod(args[0], getPeriodStart, "week");
+    const incidents = await byTimestamp(db, admin, "incidents", "createdAt", p.sinceMs);
+    console.log(formatLedgerHygieneSummary(buildLedgerHygieneSummary(incidents), p.label));
+    return true;
+  }
+  if (mode === "doors") {
+    const p = resolvePeriod(args[0], getPeriodStart, "week");
+    const incidents = await byTimestamp(db, admin, "incidents", "createdAt", p.sinceMs);
+    console.log(formatReportDoorsSummary(buildReportDoorsSummary(incidents), p.label));
+    return true;
+  }
+  if (mode === "redteam") {
+    const p = resolvePeriod(args[0], getPeriodStart, "week");
+    const incidents = await byTimestamp(db, admin, "incidents", "createdAt", p.sinceMs);
+    console.log(formatRedTeamSummary(buildRedTeamSummary(incidents), p.label));
+    return true;
+  }
   if (mode === "state") {
     const outIndex = args.indexOf("--out");
     const nowMs = Date.now();
@@ -187,4 +226,4 @@ async function runOpsReport({ db, admin, projectId, getPeriodStart }, mode, args
   return false;
 }
 
-module.exports = { runOpsReport, OPS_MODES: ["delivery", "adgate", "failures", "refusals", "prepaid", "quality", "state"] };
+module.exports = { runOpsReport, OPS_MODES: ["delivery", "adgate", "failures", "refusals", "prepaid", "quality", "dives", "raisers", "ledger", "doors", "redteam", "state"] };

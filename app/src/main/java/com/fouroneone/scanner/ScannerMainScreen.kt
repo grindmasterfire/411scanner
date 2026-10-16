@@ -161,6 +161,15 @@ fun ScannerMainScreen(
     LaunchedEffect(openRequest) {
         val requestId = openRequest ?: return@LaunchedEffect
         ScanNotifications.openRequests.value = null
+        // A Deep Dive notification: open the report it belongs to.
+        if (requestId.startsWith(DeepDiveNotifications.OPEN_PREFIX)) {
+            val cacheKey = requestId.removePrefix(DeepDiveNotifications.OPEN_PREFIX)
+            ScanHistoryManager.getRecentScans(context)
+                .firstOrNull { ScanReport.fromJson(it.rawJson)?.cacheKey == cacheKey }
+                ?.let { scanResult = it.rawJson }
+            DeepDiveNotifications.cancelResult(context, cacheKey)
+            return@LaunchedEffect
+        }
         val pending = jobs
             .filterIsInstance<ScanJobState.Delivered>()
             .firstOrNull { it.requestId == requestId }
@@ -325,8 +334,15 @@ fun ScannerMainScreen(
             }
 
         if (parsedReport != null) {
-            var savedDeepDive by remember(parsedReport.cacheKey) {
-                mutableStateOf(DeepDiveStore.load(context, parsedReport.cacheKey))
+            // Re-read whenever a background Deep Dive starts, lands, or fails.
+            val diveChanges by DeepDiveStore.changes.collectAsStateWithLifecycle()
+            val key = parsedReport.cacheKey
+            val savedDeepDive = remember(key, diveChanges) { DeepDiveStore.load(context, key) }
+            val diveRunning = remember(key, diveChanges) { DeepDiveStore.pendingFor(context, key) != null }
+            val diveFailure = remember(key, diveChanges) { DeepDiveStore.errorFor(context, key) }
+            LaunchedEffect(key, savedDeepDive) {
+                // Seen on screen: the "ready" notification is redundant.
+                if (savedDeepDive != null && !diveRunning) DeepDiveNotifications.cancelResult(context, key)
             }
             ResultScreen(
                 report = parsedReport,
@@ -335,17 +351,16 @@ fun ScannerMainScreen(
                     refreshRecentScans()
                 },
                 savedDeepDive = savedDeepDive,
+                deepDiveRunning = diveRunning,
+                deepDiveFailure = diveFailure,
+                // Same balance as the header badge (family seats: the shared bank).
+                topUpCreditsLeft = quotaStatus.serverQuota?.topUpScans,
+                deepDiveUnlimited = quotaStatus.isTesterUnlimited,
                 onRequestDeepDive = {
-                    try {
-                        ScanRepository.deepDive(parsedReport)?.also {
-                            DeepDiveStore.save(context, parsedReport.cacheKey, it)
-                            savedDeepDive = it
-                        }
-                    } finally {
-                        // A Deep Dive spends a top-up credit: re-read the bank.
-                        QuotaManager.refreshServerQuota()
-                    }
-                }
+                    // Runs in the background; arrives by notification.
+                    DeepDiveWorker.start(context, parsedReport)
+                },
+                onDismissDeepDiveFailure = { DeepDiveStore.clearError(context, key) }
             )
             return
         }

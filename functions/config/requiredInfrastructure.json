@@ -1,5 +1,5 @@
 {
-  "_doc": "Required-infrastructure exceptions (ruling 2026-10-14, D&B Dilemma). A target that ordinary businesses cannot realistically avoid keeps every finding, but its Action Meter is capped at `score` with these `instructions`. `match` lists names that identify the entity (whole words, case-insensitive). `domains` are the entity's own domains: if the scanned target points anywhere else (besides an app store), it may be an impersonator and the exception does not apply. Add an entry here to add an exception: no code change. See functions/requiredInfrastructure.js.",
+  "_doc": "Required-infrastructure exceptions (ruling 2026-10-14, D&B Dilemma). A target that ordinary businesses cannot realistically avoid keeps every finding, but its Action Meter is capped at `score` with these `instructions`. `match` lists names that identify the entity (whole words, case-insensitive). `domains` are the entity's own domains: if the scanned target points anywhere else (besides an app store), it may be an impersonator and the exception does not apply. Add an entry here to add an exception: no code change. See functions/requiredInfrastructure.js. Manual score entries (owner ruling 2026-10-16, UAC) use the same machinery for a ruled score that is not infrastructure. `watch` (optional) watchlists the entity: the listed impersonation floor raisers do not block the entry while the evidence is historical or disputed; impersonation evidence that describes an adjudicated or official adverse outcome (court, judgment, conviction, consent order, AG or regulator action) re-triggers full weight, and the evaluated score shows. History informs; current behavior drives the tier.",
   "entries": [
     {
       "id": "dun-and-bradstreet",
@@ -14,6 +14,90 @@
       ],
       "score": 7.9,
       "instructions": "Professional consideration. Dun & Bradstreet is required business infrastructure: D-U-N-S numbers and D&B records are used in business verification, credit, and contracting, and some platforms require one. Every finding in this report stands in full, including the FTC's 2022 order and the 2025 $5.7 million settlement. Deal with it professionally: read renewal terms and sales claims carefully and keep records."
+    },
+    {
+      "id": "uac-universal-adcom",
+      "kind": "manual_score",
+      "entity": "Universal AdCom, L.L.C. (UAC 4u / UAC4U)",
+      "match": [
+        "universal adcom",
+        "universal ad com",
+        "uac 4u",
+        "uac4u",
+        "uacnow",
+        "uac advertising"
+      ],
+      "domains": [
+        "uac4u.com",
+        "uacnow.com"
+      ],
+      "score": 8.4,
+      "ruling": "fire 2026-10-16 (via Muse): 8.4 DELETE FROM DEVICE, top of the band: be ready to report on a moment's notice. Current conduct (BBB F, 40+ complaints, unauthorized-invoice and collections pattern) earns the band. Historical impersonation (2008-2017) is verified but not current. The July 2025 Baker County (FL) sheriff alert is disputed and unadjudicated, so it is recorded and does not score. 8.4 rather than 8.49: the meter shows one decimal.",
+      "watch": {
+        "floorRaisers": [
+          "brand_impersonation",
+          "federal_impersonation"
+        ],
+        "retriggerOn": "adjudicated_or_official_outcome"
+      },
+      "history": [
+        {
+          "date": "2008-08-13",
+          "event": "Blog account: a business says a UAC/Hometown Productions caller claimed to be working with the Baker County Sheriff's Office (individual account, unverified).",
+          "source": "https://ikeeneye.wordpress.com/2008/08/13/advertising-scam-universal-adcom-hometown-productions/"
+        },
+        {
+          "date": "2011",
+          "event": "Dallas Morning News Watchdog coverage begins: hundreds of BBB complaints, state penalties, lawsuits; salespeople claiming partnerships that were not real.",
+          "source": "https://www.dallasnews.com/news/watchdog/2025/07/21/arlington-universal-adcom-uac4u-baker-county-sheriff-advertising-contract-2/"
+        },
+        {
+          "date": "2013-05-07",
+          "event": "Waynesburg-area (PA) chamber warning (first issued March 2013) about callers seeking ad money; firm uses more than a dozen company names.",
+          "source": "https://www.observer-reporter.com/news/2013/may/07/fundraising-scam-has-wide-reach/"
+        },
+        {
+          "date": "undated (c. 2012-2017)",
+          "event": "Grundy Center (IA) police: company claimed to work with the police department and Chamber-Main Street; both denied any affiliation.",
+          "source": "https://mail.thegrundyregister.com/node/82283"
+        },
+        {
+          "date": "undated (c. 2012-2017)",
+          "event": "Thibodaux (LA): callers claimed to represent the Chamber.",
+          "source": "https://houmatimes.com/?p=72487"
+        },
+        {
+          "date": "undated (c. 2012-2017)",
+          "event": "Lincoln County (ME) sheriff: has not contracted or employed any company for advertising materials.",
+          "source": "https://lcnme.com/currentnews/suspicious-sales-effort-targets-local-company"
+        },
+        {
+          "date": "undated (c. 2012-2017)",
+          "event": "Kentucky Lake Chamber: not associated with this company in any way.",
+          "source": "https://www.marshallcountydaily.com/?p=22454"
+        },
+        {
+          "date": "undated (c. 2012-2017)",
+          "event": "Craig (CO) police: map-sales warning; company well known to the BBB.",
+          "source": "https://www.craigdailypress.com/news/police-beware-of-scam-involving-map-sales/"
+        },
+        {
+          "date": "undated (c. 2012-2017)",
+          "event": "Matthews (NC) police '911 magnet' warning; the company said it did nothing wrong.",
+          "source": "https://www.wsoctv.com/news/local/matthews-police-warn-911-magnet-scam/329924224"
+        },
+        {
+          "date": "2025-07 (reported 2025-07-13)",
+          "event": "Baker County (FL) Sheriff's Office Scam Alert: UAC offering vehicle magnets for a fee while 'claiming to work with police when it's not'. The office: 'This is FALSE.'",
+          "source": "https://hoodline.com/2025/07/baker-county-sheriff-s-office-warns-of-universal-adcom-scam-soliciting-funds-with-false-promises/"
+        },
+        {
+          "date": "2025-07-21",
+          "event": "DISPUTED, unadjudicated. Sheriff's spokesperson: the 2022 agreement UAC produced 'appears to be forged and fraudulent', the office never entered any agreement, and would 'work a case' if it could prove who made it. UAC's owner produced a signed 2022 agreement (Sheriff Rhoden's signature; maps and magnets order) and a recorded sales call with the sheriff's assistant, who confirms giving her email but says she signed nothing and never would without the sheriff's permission. No resolution; columnist Dave Lieber: 'the truth is more elusive.'",
+          "source": "https://www.dallasnews.com/news/watchdog/2025/07/21/arlington-universal-adcom-uac4u-baker-county-sheriff-advertising-contract-2/"
+        }
+      ],
+      "instructions": "8.4 DELETE FROM DEVICE, by ruling. Every finding in this report stands in full. Universal AdCom (UAC 4u / UAC4U) sells advertising on maps, magnets, bookmarks and similar items. Its current record (BBB F, complaints of unauthorized invoices sent to collections) puts it at the top of DELETE FROM DEVICE. Police, sheriffs and chambers have warned since at least 2008 that its salespeople claimed partnerships that were not real; the most recent, Baker County (FL) Sheriff, July 2025, is disputed by the company and unresolved. Do not agree to anything by phone, confirm any claimed partnership directly with the named organization, and keep records."
     }
   ]
 }

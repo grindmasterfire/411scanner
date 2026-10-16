@@ -263,137 +263,75 @@ object ScanRepository {
     }
 
     /**
-     * Fetches the Deep Dive on demand and associates it with the
-     * Cache Bank record belonging to the originating scan.
-     *
-     * Deep Dive transport remains untouched by T03 Cache Bank OCR work.
+     * The Deep Dive request body for a report: its Cache Bank identity and
+     * the summary the server investigates from. Null without a cache key.
      */
-    suspend fun deepDive(
-        report: ScanReport
-    ): String? = withContext(Dispatchers.IO) {
-        try {
-            if (report.cacheKey.isBlank()) {
-                Log.e(
-                    TAG,
-                    "Deep dive rejected because scan cache identity is missing."
-                )
-                return@withContext null
-            }
-
-            val payload = JSONObject().apply {
-                put("data", JSONObject().apply {
-                    put("cacheKey", report.cacheKey)
-                    put("targetName", report.consumerCard.targetName)
-                    put("report", JSONObject().apply {
-                        put(
-                            "actionMeterScore",
-                            report.consumerCard.actionMeterScore
-                        )
-                        put(
-                            "verdictLabel",
-                            report.consumerCard.verdictLabel
-                        )
-                        put(
-                            "essential411",
-                            report.consumerCard.essential411
-                        )
-                        put(
-                            "classificationBadges",
-                            report.consumerCard.classificationBadges
-                                .joinToString(", ")
-                        )
-                        put(
-                            "revenueModel",
-                            report.technicalLedger
-                                .monetization
-                                .revenueModel
-                        )
-                        put(
-                            "pricing",
-                            report.technicalLedger
-                                .monetization
-                                .pricing
-                        )
-                        put(
-                            "complaintPattern",
-                            report.technicalLedger
-                                .regulatoryRecord
-                                .complaintPattern
-                        )
-                        put(
-                            "reviewSpread",
-                            report.technicalLedger
-                                .regulatoryRecord
-                                .reviewSpread
-                        )
-                    })
-                })
-            }
-
-            val requestBody = payload.toString()
-                .toRequestBody(
-                    "application/json; charset=utf-8".toMediaType()
-                )
-
-            // WHY: identify the caller for entitlement check. Without auth, backend can't verify top-up credits.
-            val idToken = AuthManager.currentIdToken()
-            val reqBuilder = Request.Builder()
-                .url(DEEP_DIVE_URL)
-                .post(requestBody)
-            if (idToken != null) reqBuilder.header("Authorization", "Bearer $idToken")
-            val request = reqBuilder.build()
-
-            AppLog.event("request") { "sent path=${request.url.encodedPath}" }
-            val response =
-                httpClient.newCall(request).execute()
-            AppLog.event("response") { "http=${response.code} path=${request.url.encodedPath}" }
-
-            val body = response.body?.string()
-
-            if (!response.isSuccessful || body == null) {
-                Log.e(
-                    TAG,
-                    "Deep dive HTTP error (${response.code}): $body"
-                )
-                // Surface the server's reason (e.g. 40201 no top-up credit)
-                // instead of silently returning nothing.
-                throw ScanErrorCodes.fromCallableError(response.code, body)
-            }
-
-            val json = JSONObject(body)
-
-            AppLog.event("parse") {
-                val envelope = when {
-                    json.has("result") -> "result.deepDive"
-                    json.has("text") -> "text"
-                    else -> "raw"
-                }
-                "deep_dive success parser=ScanRepository.deepDive envelope=$envelope"
-            }
-
-            when {
-                json.has("result") -> {
-                    val resultObj = json.optJSONObject("result")
-                    resultObj?.optString("deepDive", "") ?: ""
-                }
-
-                json.has("text") ->
-                    json.optString("text", "")
-
-                else ->
-                    body
-            }
-        } catch (e: ScanFailureException) {
-            throw e
-        } catch (e: Exception) {
-            Log.e(
-                TAG,
-                "Deep dive failed: ${e.message}"
-            )
-            AppLog.event(if (e is org.json.JSONException) "parse" else "deep_dive") {
-                "deep_dive failure at=${AppLog.failingParser(e)} error=${e.javaClass.simpleName}"
-            }
-            null
+    fun deepDiveData(report: ScanReport): JSONObject? {
+        if (report.cacheKey.isBlank()) {
+            Log.e(TAG, "Deep dive rejected because scan cache identity is missing.")
+            return null
+        }
+        return JSONObject().apply {
+            put("cacheKey", report.cacheKey)
+            put("targetName", report.consumerCard.targetName)
+            put("report", JSONObject().apply {
+                put("actionMeterScore", report.consumerCard.actionMeterScore)
+                put("verdictLabel", report.consumerCard.verdictLabel)
+                put("essential411", report.consumerCard.essential411)
+                put("classificationBadges", report.consumerCard.classificationBadges.joinToString(", "))
+                put("revenueModel", report.technicalLedger.monetization.revenueModel)
+                put("pricing", report.technicalLedger.monetization.pricing)
+                put("complaintPattern", report.technicalLedger.regulatoryRecord.complaintPattern)
+                put("reviewSpread", report.technicalLedger.regulatoryRecord.reviewSpread)
+            })
         }
     }
+
+    /** What the server said about one background Deep Dive request. */
+    sealed class DeepDiveReply {
+        data class Ready(val text: String) : DeepDiveReply()
+        /** Still running on the server: ask again with the same ID. */
+        object Pending : DeepDiveReply()
+        /** No answer (network, timeout): ask again with the same ID. */
+        data class Unreachable(val reason: String) : DeepDiveReply()
+    }
+
+    /**
+     * Sends (or follows) one Deep Dive by its request ID. The server claims
+     * the ID before charging, so asking again with the same ID never runs or
+     * charges a second dive: it answers done, still running, or the failure.
+     * A server refusal (e.g. 40201 no top-up credit) throws ScanFailureException.
+     */
+    suspend fun requestDeepDive(data: JSONObject, requestId: String): DeepDiveReply =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject().put("data", JSONObject(data.toString()).put("requestId", requestId))
+                .toString()
+                .toRequestBody("application/json; charset=utf-8".toMediaType())
+            val builder = Request.Builder().url(DEEP_DIVE_URL).post(body)
+            AuthManager.currentIdToken()?.let { builder.header("Authorization", "Bearer $it") }
+            try {
+                AppLog.event("request") { "deep_dive sent id=$requestId" }
+                httpClient.newCall(builder.build()).execute().use { response ->
+                    val text = response.body?.string()
+                    AppLog.event("response") { "deep_dive http=${response.code} id=$requestId" }
+                    if (!response.isSuccessful || text == null) {
+                        throw ScanErrorCodes.fromCallableError(response.code, text)
+                    }
+                    val result = JSONObject(text).optJSONObject("result") ?: JSONObject()
+                    when {
+                        result.optString("state") == "pending" -> DeepDiveReply.Pending
+                        result.optString("deepDive").isNotBlank() -> DeepDiveReply.Ready(result.optString("deepDive"))
+                        else -> DeepDiveReply.Unreachable("empty reply")
+                    }
+                }
+            } catch (e: ScanFailureException) {
+                throw e
+            } catch (e: IOException) {
+                AppLog.event("deep_dive") { "unreachable id=$requestId ${e.javaClass.simpleName}: ${e.message}" }
+                DeepDiveReply.Unreachable(e.message ?: e.javaClass.simpleName)
+            } catch (e: org.json.JSONException) {
+                AppLog.event("parse") { "deep_dive unreadable reply id=$requestId" }
+                DeepDiveReply.Unreachable("unreadable reply")
+            }
+        }
 }
