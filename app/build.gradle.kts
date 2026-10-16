@@ -18,7 +18,7 @@ android {
     applicationId = "com.fouroneone.scanner"
     minSdk = 24
     targetSdk = 36
-    versionCode = 11
+    versionCode = 12
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -51,8 +51,12 @@ android {
   buildTypes {
     release {
       isCrunchPngs = false
-      isMinifyEnabled = true
-      isShrinkResources = true
+      // Shrinking (R8) crashed the release build at startup (1.0 (11),
+      // 2026-10-16), as it once did for debug. The release ships the same
+      // unshrunk code the device tests ran; re-enable only with keep rules
+      // proven on a device.
+      isMinifyEnabled = false
+      isShrinkResources = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
