@@ -673,20 +673,33 @@ async function checkAsnOrg(ipAddress) {
       PER_CHECK_TIMEOUT_MS,
       "cymru"
     ).catch(() => null);
-    if (!records || records.length === 0) return null;
-    // Format: "13335 | 172.66.160.0/20 | US | arin | 2000-01-01"
-    const raw = records.flat().join(" ");
-    const parts = raw.split("|").map((p) => p.trim());
-    if (parts.length < 3) return null;
-    return {
-      asn: parts[0],
-      prefix: parts[1],
-      country: parts[2],
-      raw,
-    };
+    return parseCymruOrigin(records);
   } catch (e) {
     return null;
   }
+}
+
+/*
+ * Team Cymru origin answer(s). One TXT record per origin network:
+ * "13335 | 172.66.160.0/20 | US | arin | 2000-01-01". An address can be
+ * announced by more than one network (hik-connect.com: 14618 and 16509),
+ * and a record's text can arrive in chunks: each record is read on its
+ * own. (They used to be glued into one string, which put
+ * "14618 | 52.4.0.0/14 | … 16509 | …" into the ASN field.)
+ */
+function parseCymruOrigin(records) {
+  if (!Array.isArray(records) || records.length === 0) return null;
+  const origins = records
+    .map((chunks) => (Array.isArray(chunks) ? chunks.join("") : String(chunks || "")))
+    .map((line) => line.split("|").map((p) => p.trim()))
+    .filter((parts) => parts.length >= 3);
+  const asns = [];
+  for (const [field] of origins) {
+    for (const n of field.split(/\s+/)) if (/^\d+$/.test(n) && !asns.includes(n)) asns.push(n);
+  }
+  if (!asns.length) return null;
+  const first = origins[0];
+  return { asn: asns[0], asns, prefix: first[1], country: first[2], raw: first.join(" | ") };
 }
 
 /*
@@ -966,11 +979,13 @@ function applyMeasuredLedger(report, probe) {
 
   // asn / asn_organization: probe returns {asn,prefix,country,raw}; schema has two strings
   if (probe.asn_org) {
+    // ASN holds the network number(s); ASN Organization holds the
+    // operator's name from the AS lookup, never the raw lookup line.
     if (probe.asn_org.asn) {
-      infra.asn = probe.asn_org.asn;
+      infra.asn = (probe.asn_org.asns && probe.asn_org.asns.length ? probe.asn_org.asns : [probe.asn_org.asn]).join(", ");
     }
-    if (probe.asn_org.raw) {
-      infra.asn_organization = probe.asn_org.raw;
+    if (probe.asn_org.name) {
+      infra.asn_organization = probe.asn_org.name;
     }
     if (probe.asn_org.country) {
       infra.asn_country = probe.asn_org.country;
@@ -1071,10 +1086,12 @@ function applyMeasuredLedger(report, probe) {
     );
   }
   if (probe.asn_org && probe.asn_org.asn) {
-    const asnNum = String(infra.asn).replace(/[^0-9]/g, "");
+    const asnNum = String(probe.asn_org.asn).replace(/[^0-9]/g, "");
+    const others = (probe.asn_org.asns || []).filter((n) => n !== asnNum);
     stampProbeReceipt(
       "infrastructure.asn",
-      `ASN: ${infra.asn}${infra.asn_organization ? ` (${infra.asn_organization})` : ""}`,
+      `ASN: AS${asnNum}${infra.asn_organization ? ` (${infra.asn_organization})` : ""}` +
+        (others.length ? `; the address is also announced by ${others.map((n) => `AS${n}`).join(", ")}.` : ""),
       asnNum ? `https://bgp.he.net/AS${asnNum}` : ""
     );
   }
@@ -1259,4 +1276,5 @@ module.exports = {
   _detectCdn: detectCdn,
   _checkTls: checkTls,
   _checkRdap: checkRdap,
+  _parseCymruOrigin: parseCymruOrigin,
 };
