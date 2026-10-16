@@ -31,7 +31,9 @@ data class QuotaStatus(
     /** Paid server tier or an active rental pass (no-fill may pass). */
     val isSubscriber: Boolean = false,
     /** Top-up bank for the header readout; null when it does not apply. */
-    val topUpBalance: TopUpBalance? = null
+    val topUpBalance: TopUpBalance? = null,
+    /** False only for the placeholder shown before the real quota is read. */
+    val loaded: Boolean = true
 )
 
 /**

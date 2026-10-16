@@ -62,7 +62,10 @@ fun ScannerMainScreen(
     val quotaStatus by remember(context) {
         QuotaManager.getQuotaStatusFlow(context)
     }.collectAsStateWithLifecycle(
-        initialValue = QuotaStatus(0, 3, false, 0L, 3, false)
+        // Not a quota: a placeholder until the real one is read, so the
+        // badge says it's checking instead of showing made-up numbers
+        // (it showed "3/3" on fresh installs, then flipped).
+        initialValue = QuotaStatus(maxWeeklyScans = 1, remainingScans = 1, loaded = false)
     )
 
     // Family plan invites addressed to this account: accept or decline.

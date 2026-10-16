@@ -18,7 +18,7 @@ android {
     applicationId = "com.fouroneone.scanner"
     minSdk = 24
     targetSdk = 36
-    versionCode = 10
+    versionCode = 11
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

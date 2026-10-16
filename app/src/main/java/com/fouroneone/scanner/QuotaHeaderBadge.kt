@@ -29,6 +29,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
+/** Shown until the real quota has been read: never placeholder numbers. */
+internal const val QUOTA_CHECKING_LABEL = "CHECKING YOUR SCANS…"
+
 /**
  * Compact header badge displaying real-time scan quota and auth trigger.
  */
@@ -41,6 +44,12 @@ fun QuotaHeaderBadge(
     val userState by AuthManager.userState.collectAsStateWithLifecycle()
 
     val (bgColor, textColor, icon, label) = when {
+        !quotaStatus.loaded -> Quadruple(
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant,
+            Icons.Default.Bolt,
+            QUOTA_CHECKING_LABEL
+        )
         quotaStatus.isTesterUnlimited -> Quadruple(
             MaterialTheme.colorScheme.primaryContainer,
             MaterialTheme.colorScheme.onPrimaryContainer,
