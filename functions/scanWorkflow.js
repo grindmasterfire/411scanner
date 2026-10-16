@@ -52,6 +52,8 @@ const { resolveAllLinks } = require("./linkResolver");
 const {
   runNetworkProbe,
   applyMeasuredLedger,
+  checkRegistered,
+  isAppPackage,
   isPlatformHost,
   applyRedirectPath,
 } = require("./networkProbe");
@@ -75,7 +77,7 @@ const { enforceAdGate, releaseAdGate } = require("./adGate");
 const { recordScanEvent, researchQuality } = require("./scanDeliveryEvents");
 const { attackClientView, scanForInjection, injectionNotice, applyRegulatoryClaimCap, applyAttackFloor, isAttackReport, isPureInjection } = require("./redTeamGuards");
 const { applyReportDestinations } = require("./reportDestinations");
-const { scrubStateCodes } = require("./registryLedger");
+const { scrubStateCodes, applyNotRegistered } = require("./registryLedger");
 const { reasonTemplate } = require("./technicalLedgerEvidence");
 const { applyRequiredInfrastructure } = require("./requiredInfrastructure");
 const { getVerdict } = require("./actionMeter");
@@ -751,8 +753,10 @@ async function executeScan(
       tl.attribution && tl.attribution.official_domain,
       identity.destination_domain,
     ].filter((c) => c && String(c).includes("."));
+    // An Android package name ("com.blossomsocial") is not a website: it
+    // sat first in line on app-store scans and failed the probe every time.
     const ownDomains = candidates.filter(
-      (c) => !isPlatformListing(c) && !fakedBrand.has(cleanHost(c))
+      (c) => !isPlatformListing(c) && !fakedBrand.has(cleanHost(c)) && !isAppPackage(c)
     );
 
     if (candidates.length && !ownDomains.length) {
@@ -761,11 +765,31 @@ async function executeScan(
       // proceed on OSINT + model analysis.
       probeStatus = fakedBrand.size ? "impersonated_brand_not_probed" : "platform_target_no_probe";
     } else if (ownDomains.length) {
-      candidates.splice(0, candidates.length, ...ownDomains);
-      const fallbackProbe = await runNetworkProbe(null, candidates[0]);
-      if (fallbackProbe && fallbackProbe.measured) {
+      // Try each of the report's own domains until one measures. Many sites
+      // answer only on "www." (hik-connect.com, 2026-10-16), so try that too.
+      const tried = [...new Set(ownDomains.map(cleanHost))].slice(0, 3);
+      let fallbackProbe = null;
+      let registryProbe = null;
+      for (const domain of tried) {
+        for (const host of domain.startsWith("www.") ? [domain] : [domain, `www.${domain}`]) {
+          const p = await runNetworkProbe(null, host);
+          if (p && p.measured) { fallbackProbe = p; break; }
+          if (!registryProbe && p && (p.registrar || p.registration_dates)) registryProbe = p;
+        }
+        if (fallbackProbe) break;
+      }
+      if (fallbackProbe) {
         applyMeasuredLedger(report, fallbackProbe);
         probeStatus = "fallback_measured";
+      } else if (registryProbe) {
+        // The site didn't answer, but the registry did: its record still
+        // counts (registrar, dates). The unreachable site is recorded as such.
+        applyMeasuredLedger(report, { ...registryProbe, measured: true });
+        probeStatus = "registry_only";
+      } else if ((await checkRegistered(tried[0])) === false) {
+        // Not in the registry at all: that IS the finding.
+        applyNotRegistered(report, tried[0]);
+        probeStatus = "not_registered";
       } else {
         probeStatus = "fallback_unmeasured";
       }

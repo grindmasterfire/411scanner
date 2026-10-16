@@ -80,6 +80,30 @@ function applyRegistryValues(report, probe, stampReceipt, sourceUrl) {
   }
 }
 
+/**
+ * The registry has no record of the domain: say so, with the ICANN lookup
+ * as the source the customer can open. Replaces any model claim about the
+ * domain's WHOIS (it can't be "privacy-shielded" if it doesn't exist).
+ */
+function applyNotRegistered(report, domain, checkedOn = new Date().toISOString().slice(0, 10)) {
+  const ledger = report.technical_ledger || (report.technical_ledger = {});
+  const reg = ledger.domain_registration || (ledger.domain_registration = {});
+  for (const k of ["registrar", "registered_on", "updated_on", "expires_on", "registrant_name", "registrant_organization", "registrant_country"]) reg[k] = "";
+  const receipts = Array.isArray(ledger.evidence_receipts) ? ledger.evidence_receipts : (ledger.evidence_receipts = []);
+  const source = `https://lookup.icann.org/en/lookup?name=${encodeURIComponent(domain)}`;
+  const rows = [
+    ["domain_registration.registrar",
+      `The domain registry has no record of ${domain} (checked ${checkedOn}): it is not registered, so it has no registrar, owner, or dates. The address on this specimen leads nowhere: it was never registered, has expired, or was taken down.`],
+    ["domain_registration.registrant",
+      `No one owns ${domain}: it is not registered, so there is no registrant record to look up.`],
+  ];
+  for (const [field, finding] of rows) {
+    const row = { field, status: "searched_not_found", finding, authority: "Domain registry (RDAP)", source_url: source, subject: domain, identifier: "not registered" };
+    const at = receipts.findIndex((r) => r && r.field === field);
+    if (at >= 0) receipts[at] = row; else receipts.push(row);
+  }
+}
+
 /** Ledger blocks whose fields are values shown to the customer. */
 const VALUE_BLOCKS = ["attribution", "domain_registration", "infrastructure", "network_telemetry", "monetization", "regulatory_record"];
 
@@ -121,4 +145,4 @@ function scrubStateCodes(report, reasonFor) {
   return cleared;
 }
 
-module.exports = { STATE_CODE, applyRegistryValues, scrubStateCodes };
+module.exports = { STATE_CODE, applyRegistryValues, applyNotRegistered, scrubStateCodes };

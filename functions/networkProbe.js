@@ -1215,7 +1215,39 @@ function applyRedirectPath(report, linkEvidence) {
   return report;
 }
 
+/**
+ * Is the domain in its registry at all? true / false (registry answered
+ * "no such domain") / null (couldn't tell). Olymp Capital, 2026-10-16: the
+ * ad's domain had no registry record and no DNS; the model wrote that its
+ * WHOIS was "privacy-shielded".
+ */
+function checkRegistered(domain, redirectsLeft = 2) {
+  const tld = String(domain || "").split(".").pop().toLowerCase();
+  const url = (RDAP_BASE[tld] || "https://rdap.org/domain/") + encodeURIComponent(domain);
+  const ask = (target, left) => withTimeout(new Promise((resolve) => {
+    const req = https.get(target, { headers: { "User-Agent": SCANNER_UA, Accept: "application/json" } }, (res) => {
+      res.resume();
+      const location = res.headers.location;
+      if ([301, 302, 303, 307, 308].includes(res.statusCode) && location && left > 0) {
+        const next = new URL(location, target).toString();
+        resolve(next.startsWith("https://") ? ask(next, left - 1) : null);
+        return;
+      }
+      resolve(res.statusCode === 200 ? true : res.statusCode === 404 ? false : null);
+    });
+    req.on("error", () => resolve(null));
+  }), RDAP_TIMEOUT_MS, "rdap").catch(() => null);
+  return ask(url, redirectsLeft);
+}
+
+/* An Android package name ("com.blossomsocial"), not a website. */
+function isAppPackage(candidate) {
+  return /^(com|org|net|io|co|app|me|ai|de|uk|us|in|tv|ca|au|fr|jp)\.[a-z0-9_]+(\.[a-z0-9_]+)*$/i.test(String(candidate || "").trim());
+}
+
 module.exports = {
+  checkRegistered,
+  isAppPackage,
   runNetworkProbe,
   probeContextBlock,
   applyMeasuredLedger,
