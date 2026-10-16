@@ -22,7 +22,6 @@ app/google-services.json
 # Release signing (never commit)
 *.jks
 *.keystore
-!debug.keystore
 keystore.properties
 411-scanner-*.aab
 411-scanner-*.apk
