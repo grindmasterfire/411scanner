@@ -97,7 +97,7 @@ We may update these terms as the service changes. Material changes will be annou
 
 ## 16. Governing Law
 
-These terms are governed by the laws of the **State of Georgia** and the applicable federal laws of the **United States of America**, without regard to conflict-of-law principles, wherever you use the service. Cipherworks Dev Cottage is a United States business registered in Georgia. Nothing in these terms takes away consumer protections that the law of your country gives you and that can't be waived by contract.
+These terms are governed by the applicable federal laws of the **United States of America**, without regard to conflict-of-law principles, wherever you use the service. Nothing in these terms takes away consumer protections that the law of your country gives you and that can't be waived by contract.
 
 ## 17. Contact
 
